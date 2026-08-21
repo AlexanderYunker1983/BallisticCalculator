@@ -1,0 +1,22 @@
+<Application x:Class="BallisticCalculator.Wpf.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MainWindow.xaml">
+    <Application.Resources>
+        <!-- Глобальные настройки для более корректного отображения на высоких DPI -->
+
+        <!-- Окна: включаем выравнивание по пикселям и layout rounding -->
+        <Style TargetType="Window">
+            <Setter Property="UseLayoutRounding" Value="True" />
+            <Setter Property="SnapsToDevicePixels" Value="True" />
+        </Style>
+
+        <!-- Текст: настройки рендеринга для чёткости на разных масштабах -->
+        <Style TargetType="TextBlock">
+            <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
+            <Setter Property="TextOptions.TextRenderingMode" Value="Auto" />
+            <Setter Property="TextOptions.TextHintingMode" Value="Fixed" />
+        </Style>
+    </Application.Resources>
+</Application>
+
