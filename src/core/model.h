@@ -1,0 +1,62 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+#include <array>
+#include <functional>
+#include <string>
+#include <vector>
+
+namespace ballistic {
+constexpr double Pi = 3.14159265358979323846;
+constexpr double EarthRadius = 6371100.0;
+constexpr double G0 = 9.80665;
+constexpr double ReferenceArea = 4.908738521875;
+using State = std::array<double, 4>; // speed, flight-path angle, radius, central angle
+
+struct Parameters {
+    double payload = 3000;
+    std::array<double, 3> mass{{70480, 29920, 7700}};
+    std::array<double, 3> fuel{{60380, 26360, 7346}};
+    std::array<double, 3> thrust{{1470000, 392000, 110000}};
+    std::array<double, 3> exhaustVelocity{{3297.5, 3498, 3295.6}};
+    double verticalTime = 40;
+    double turnTime = 310;
+    double turnDegrees = 14.97;
+    std::array<double, 3> separationTimes() const;
+    double duration() const { return separationTimes()[2]; }
+    double totalMass() const;
+};
+
+struct Options {
+    double maxStep = 0.01;
+    double targetAltitude = 250000;
+    double altitudeTolerance = 100;
+    double velocityTolerance = 0.1;
+    int maxIterations = 40;
+    int maxEvaluations = 250;
+    std::size_t maxSteps = 2000000;
+    double timeLimitSeconds = 60;
+    bool optimize = true;
+};
+
+enum class Status { Completed, Cancelled, InvalidInput, NotConverged, NumericalFailure };
+struct Sample {
+    double time = 0, velocity = 0, theta = Pi / 2, radius = EarthRadius, arc = 0;
+    double phi = Pi / 2, alpha = 0, mass = 0, acceleration = 0;
+    double density = 0, mach = 0, overload = 0;
+};
+struct Result {
+    Status status = Status::InvalidInput;
+    std::string message;
+    Parameters parameters;
+    Options options;
+    std::vector<Sample> trajectory;
+    int evaluations = 0;
+    bool atmosphereClamped = false;
+    double elapsedSeconds = 0;
+};
+using CancelCheck = std::function<bool()>;
+using Progress = std::function<void(int, double, double)>;
+std::string validate(const Parameters &p, const Options &o);
+double programAngle(const Parameters &p, double t);
+double orbitalSpeed(double altitude);
+} // namespace ballistic

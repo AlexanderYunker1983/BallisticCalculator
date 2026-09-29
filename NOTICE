@@ -1,0 +1,25 @@
+BallisticCalculator native Qt application and C++ core
+SPDX-License-Identifier: GPL-3.0-or-later
+
+The application and core in src/, tests in tests/, and build and packaging
+scripts in the root directory and scripts/ are free software: you can
+redistribute them and/or modify them
+under the terms of the GNU General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option)
+any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE. See LICENSE for the full license terms.
+
+The native port is a modified C++/Qt implementation of the original .NET
+BallisticCalculator, Copyright (c) 2021 Alexander Yunker. The port changes
+numerical integration, event handling, validation, optimization, atmosphere,
+threading and user interface behavior; see docs/user-guide.ru.md.
+Date of the native port and license transition: 2026-09-29.
+
+The original MIT copyright and permission notice is preserved in
+LICENSES/MIT-legacy.txt (licenses/MIT-legacy.txt in the binary distribution).
+The current source tree contains only the native C++/Qt implementation.
+Earlier MIT releases retain their original license. Third-party libraries
+retain their own licenses.

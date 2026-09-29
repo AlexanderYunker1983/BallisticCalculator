@@ -1,0 +1,5 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<RCC><qresource prefix="/ui">
+    <file alias="check-light.svg">icons/check-light.svg</file>
+    <file alias="check-dark.svg">icons/check-dark.svg</file>
+</qresource></RCC>
