@@ -11,6 +11,7 @@ constexpr double EarthRadius = 6371100.0;
 constexpr double G0 = 9.80665;
 constexpr double ReferenceArea = 4.908738521875;
 using State = std::array<double, 4>; // speed, flight-path angle, radius, central angle
+enum class ProgramDomain { Bounded, LegacyUnbounded };
 
 struct Parameters {
     double payload = 3000;
@@ -21,6 +22,7 @@ struct Parameters {
     double verticalTime = 40;
     double turnTime = 310;
     double turnDegrees = 14.97;
+    ProgramDomain programDomain = ProgramDomain::Bounded;
     std::array<double, 3> separationTimes() const;
     double duration() const { return separationTimes()[2]; }
     double totalMass() const;
@@ -69,7 +71,7 @@ using CancelCheck = std::function<bool()>;
 using Progress = std::function<void(int, double, double)>;
 enum class ValidationCode {
     None, PositiveFinite, FuelMass, StageDuration, TotalMass, StartThrust,
-    TimeOrder, AngleRange, StepRange, TargetRange, Limit
+    TimeOrder, AngleRange, ProgramRange, StepRange, TargetRange, Limit
 };
 enum class InputField {
     None, Payload, Mass, Fuel, Thrust, ExhaustVelocity, VerticalTime, TurnTime,
@@ -89,5 +91,7 @@ ValidationIssue validateOptions(const Options &o);
 ValidationIssue validateDetailed(const Parameters &p, const Options &o);
 std::string validate(const Parameters &p, const Options &o);
 double programAngle(const Parameters &p, double t);
+struct ProgramEnvelope { double minimum, maximum; }; // Radians; valid vehicle/times required.
+ProgramEnvelope programEnvelope(const Parameters &p);
 double orbitalSpeed(double altitude);
 } // namespace ballistic

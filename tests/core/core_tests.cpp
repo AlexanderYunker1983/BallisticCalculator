@@ -8,6 +8,15 @@
 #include <future>
 #include <limits>
 using namespace ballistic;
+namespace {
+struct ReferenceCase {
+    const char *name;
+    double payload, verticalTime, turnTime, angle, altitude, velocity, theta, arc;
+};
+const ReferenceCase references[] = {
+#include "reference_cases.inc"
+};
+}
 
 class CoreTests : public QObject {
     Q_OBJECT
@@ -179,7 +188,7 @@ private slots:
         QCOMPARE(validateVehicle(p).code, ValidationCode::TotalMass);
         p = Parameters{}; p.exhaustVelocity[0] = 1e-308;
         QCOMPARE(validateVehicle(p).code, ValidationCode::StageDuration);
-        p = Parameters{}; p.turnTime = p.duration() - 0.001;
+        p = Parameters{}; p.turnDegrees = 0; p.turnTime = p.duration() - 0.001;
         QVERIFY(validateProgram(p).empty());
         p.turnTime = p.duration() - 0.000999;
         QVERIFY(!validateProgram(p).empty());
@@ -211,6 +220,7 @@ private slots:
     }
     void invalidSensitivityProbeDoesNotAbort() {
         Parameters p; p.turnTime = 580; p.turnDegrees = 12.985755371093751;
+        p.programDomain = ProgramDomain::LegacyUnbounded;
         Options o; o.maxStep = 0.1; o.optimize = false;
         QCOMPARE(solver.run(p, o).status, Status::Completed);
         o.optimize = true;
@@ -232,10 +242,79 @@ private slots:
         QCOMPARE(solver.run(Parameters{}, o).diagnostics.reason, StopReason::TimeLimit);
         QCOMPARE(solver.run(Parameters{}, Options{}, [] { return true; }).diagnostics.reason, StopReason::Cancelled);
         Parameters p; p.turnTime = 580; p.turnDegrees = 12.985755371093751;
+        p.programDomain = ProgramDomain::LegacyUnbounded;
         o = Options{}; o.maxStep = 0.1; o.maxEvaluations = 2;
         r = solver.run(p, o);
         QCOMPARE(r.diagnostics.reason, StopReason::EvaluationLimit);
         QCOMPARE(r.evaluations, 2); QCOMPARE(r.diagnostics.rejectedProbes, 1);
+    }
+    void independentReferenceMatrix_data() {
+        QTest::addColumn<int>("scenario"); QTest::addColumn<double>("step");
+        for (int i = 0; i < int(sizeof(references) / sizeof(references[0])); ++i)
+            for (double step : {1.0, 0.05, 0.01, 0.005})
+                QTest::newRow(qPrintable(QString("%1-step-%2").arg(references[i].name).arg(step))) << i << step;
+    }
+    void independentReferenceMatrix() {
+        QFETCH(int, scenario); QFETCH(double, step);
+        const auto &reference = references[scenario];
+        Parameters p; p.payload = reference.payload; p.verticalTime = reference.verticalTime;
+        p.turnTime = reference.turnTime; p.turnDegrees = reference.angle;
+        Options o; o.optimize = false; o.maxStep = step;
+        const auto r = solver.run(p, o); QVERIFY2(r.status == Status::Completed, r.message.c_str());
+        const auto &last = r.trajectory.back();
+        qInfo("reference delta H=%.9g m, V=%.9g m/s, theta=%.9g rad, arc=%.9g rad",
+              last.radius - EarthRadius - reference.altitude, last.velocity - reference.velocity,
+              last.theta - reference.theta, last.arc - reference.arc);
+        QVERIFY(std::abs(last.radius - EarthRadius - reference.altitude) < 0.05);
+        QVERIFY(std::abs(last.velocity - reference.velocity) < 0.0001);
+        QVERIFY(std::abs(last.theta - reference.theta) < 1e-7);
+        QVERIFY(std::abs(last.arc - reference.arc) < 1e-8);
+        if (reference.altitude > 300000) QVERIFY(r.atmosphereClamped);
+    }
+    void analyticRocketAndCircularMotion() {
+        std::array<double, 2> rocket{{0, 10000}};
+        for (int i = 0; i < 1000; ++i)
+            rocket = rk4(rocket, i * .05, .05, [](double, const std::array<double, 2> &s) {
+                return std::array<double, 2>{{3000 * 10 / s[1], -10}};
+            });
+        QVERIFY(std::abs(rocket[0] - 3000 * std::log(10000.0 / 9500)) < 1e-9);
+        std::array<double, 4> orbit{{1, 0, 0, 1}};
+        const double step = 2 * Pi / 2000;
+        for (int i = 0; i < 2000; ++i)
+            orbit = rk4(orbit, i * step, step, [](double, const std::array<double, 4> &s) {
+                const double r = std::hypot(s[0], s[1]);
+                return std::array<double, 4>{{s[2], s[3], -s[0] / (r*r*r), -s[1] / (r*r*r)}};
+            });
+        QVERIFY(std::hypot(orbit[0] - 1, orbit[1]) < 1e-8);
+        const double energy = (orbit[2]*orbit[2] + orbit[3]*orbit[3]) / 2 - 1 / std::hypot(orbit[0], orbit[1]);
+        QVERIFY(std::abs(energy + .5) < 1e-10);
+    }
+    void coincidentEventsAndProgramDomain() {
+        Parameters p; p.verticalTime = p.separationTimes()[0]; p.turnTime = p.separationTimes()[1]; p.turnDegrees = 10;
+        Options o; o.optimize = false; o.maxStep = .1;
+        const auto r = solver.run(p, o); QVERIFY2(r.status == Status::Completed, r.message.c_str());
+        for (double event : p.separationTimes()) {
+            const auto count = std::count_if(r.trajectory.begin(), r.trajectory.end(), [=](const Sample &s) { return s.time == event; });
+            QCOMPARE(int(count), 1);
+        }
+        p = Parameters{}; p.turnTime = p.duration() - .01;
+        QVERIFY(programEnvelope(p).maximum > 1000);
+        QCOMPARE(validateProgram(p).code, ValidationCode::ProgramRange);
+        QCOMPARE(solver.run(p, o).status, Status::InvalidInput);
+        p.programDomain = ProgramDomain::LegacyUnbounded; QVERIFY(validateProgram(p).empty());
+        p = Parameters{};
+        const auto range = programEnvelope(p); QCOMPARE(range.minimum, 0.0); QCOMPARE(range.maximum, Pi / 2);
+    }
+    void optimizationTargetMatrix_data() {
+        QTest::addColumn<double>("target");
+        for (double target : {240000.0, 250000.0, 260000.0}) QTest::newRow(qPrintable(QString::number(target))) << target;
+    }
+    void optimizationTargetMatrix() {
+        QFETCH(double, target); Options o; o.targetAltitude = target;
+        const auto r = solver.run(Parameters{}, o); QVERIFY2(r.status == Status::Completed, r.message.c_str());
+        QVERIFY(std::abs(r.trajectory.back().radius - EarthRadius - target) <= o.altitudeTolerance);
+        QVERIFY(std::abs(r.trajectory.back().velocity - orbitalSpeed(target)) <= o.velocityTolerance);
+        QVERIFY(validateProgram(r.parameters).empty());
     }
 };
 QTEST_APPLESS_MAIN(CoreTests)

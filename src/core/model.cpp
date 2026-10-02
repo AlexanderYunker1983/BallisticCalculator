@@ -2,6 +2,7 @@
 #include "model.h"
 #include <cmath>
 #include <numeric>
+#include <algorithm>
 
 namespace ballistic {
 std::array<double, 3> Parameters::separationTimes() const {
@@ -31,5 +32,21 @@ double programAngle(const Parameters &p, double t) {
 }
 double orbitalSpeed(double altitude) {
     return std::sqrt(G0 * EarthRadius * EarthRadius / (EarthRadius + altitude));
+}
+ProgramEnvelope programEnvelope(const Parameters &p) {
+    const double phi = p.turnDegrees * Pi / 180;
+    const double interval = p.verticalTime - p.turnTime;
+    const double slope = -phi / (p.duration() - p.turnTime);
+    const double a = (Pi / 2 - phi - slope * interval) / (interval * interval);
+    ProgramEnvelope range{0, Pi / 2};
+    if (a != 0) {
+        const double x = -slope / (2 * a);
+        if (x > interval && x < 0) {
+            const double extremum = phi + slope * x + a * x * x;
+            range.minimum = std::min(range.minimum, extremum);
+            range.maximum = std::max(range.maximum, extremum);
+        }
+    }
+    return range;
 }
 }

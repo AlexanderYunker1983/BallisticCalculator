@@ -53,6 +53,12 @@ ValidationIssue validateProgram(const Parameters &p) {
                      "Времена должны удовлетворять условию: 0 ≤ t₀ < t₁ < время окончания работы; интервалы не менее 0,001 с.");
     if (!std::isfinite(p.turnDegrees) || p.turnDegrees < 0 || p.turnDegrees > 90)
         return issue(ValidationCode::AngleRange, InputField::TurnDegrees, "Угол φ₁ должен находиться в диапазоне 0–90°.");
+    if (p.programDomain != ProgramDomain::Bounded && p.programDomain != ProgramDomain::LegacyUnbounded)
+        return issue(ValidationCode::ProgramRange, InputField::TurnDegrees, "Неизвестная область программы угла.");
+    const auto range = programEnvelope(p);
+    if (p.programDomain == ProgramDomain::Bounded && (range.minimum < -1e-12 || range.maximum > Pi / 2 + 1e-12))
+        return issue(ValidationCode::ProgramRange, InputField::TurnDegrees,
+                     "Программа угла выходит за диапазон 0–90°. Уменьшите угол или время поворота.");
     return {};
 }
 ValidationIssue validateOptions(const Options &o) {

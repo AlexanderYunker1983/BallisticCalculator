@@ -15,3 +15,4 @@ DISTFILES += README.md LICENSE NOTICE .gitignore build-release.cmd rebuild-relea
     LICENSES/MIT-legacy.txt \
     docs/user-guide.ru.md docs/core-api.ru.md docs/ui-design.ru.md \
     scripts/build-qt.cmd scripts/clean-qt.ps1 scripts/package-qt.ps1 scripts/qt-license-notices.ps1
+DISTFILES += scripts/reference-solver.py docs/numerical-validation.ru.md docs/refactoring-validation.ru.md
