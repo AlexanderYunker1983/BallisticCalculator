@@ -61,6 +61,15 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     cutoff_ = addInput(QString::fromUtf8("Выключение двигателя, с"), "engineCutoffTime", 86400, 0, 5);
     cutoff_->setSpecialValueText(QString::fromUtf8("Всё топливо"));
     cutoff_->setToolTip(QString::fromUtf8("Время от старта для последней ступени; 0 — выработка всего топлива. При подборе это начальное приближение."));
+    auto *resetCutoff = new QPushButton(QString::fromUtf8("Всё топливо"));
+    resetCutoff->setObjectName("resetCutoffButton");
+    resetCutoff->setToolTip(QString::fromUtf8("Сбросить время выключения в состояние «Всё топливо» (0)"));
+    form->addWidget(resetCutoff, 1, 6);
+    connect(resetCutoff, &QPushButton::clicked, this, [this] {
+        cutoff_->setValue(0);
+        cutoff_->setProperty("invalid", false); ThemeManager::repolish(cutoff_);
+        cutoff_->setFocus();
+    });
     vertical_->setToolTip(QString::fromUtf8("t₀ — длительность вертикального участка от старта"));
     turnTime_->setToolTip(QString::fromUtf8("t₁ — время выхода на заданный угол; должно быть больше t₀"));
     angle_->setToolTip(QString::fromUtf8("φ₁ — угол программы полёта в момент t₁"));
@@ -128,7 +137,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     });
     QWidget::setTabOrder(edit_, vertical_); QWidget::setTabOrder(vertical_, turnTime_);
     QWidget::setTabOrder(turnTime_, angle_); QWidget::setTabOrder(angle_, target_);
-    QWidget::setTabOrder(target_, step_); QWidget::setTabOrder(step_, cutoff_); QWidget::setTabOrder(cutoff_, optimize_);
+    QWidget::setTabOrder(target_, step_); QWidget::setTabOrder(step_, cutoff_);
+    QWidget::setTabOrder(cutoff_, resetCutoff); QWidget::setTabOrder(resetCutoff, optimize_);
     QWidget::setTabOrder(optimize_, start_); QWidget::setTabOrder(start_, cancel_);
     controller_ = new CalculationController(this);
     connect(controller_, &CalculationController::progress, this, [this](int iteration, double h, double v) {
