@@ -14,6 +14,10 @@ class CoreTests : public QObject {
     Solver solver;
     Result optimized;
 private slots:
+    void initTestCase() {
+        optimized = solver.run(Parameters{});
+        QVERIFY2(optimized.status == Status::Completed, optimized.message.c_str());
+    }
     void rkUsesIndependentTime() {
         std::array<double, 1> y{{0}};
         const auto result = rk4(y, 10.0, 0.01, [](double t, const std::array<double, 1> &) {
@@ -72,7 +76,6 @@ private slots:
         QVERIFY(!r.message.empty()); QVERIFY(r.trajectory.empty());
     }
     void optimizeDefault() {
-        optimized = solver.run(Parameters{});
         qInfo("status=%d; %s; evaluations=%d; seconds=%.3f", int(optimized.status),
               optimized.message.c_str(), optimized.evaluations, optimized.elapsedSeconds);
         QVERIFY2(optimized.status == Status::Completed, optimized.message.c_str());
@@ -151,6 +154,27 @@ private slots:
         QCOMPARE(int(solver.run(Parameters{}, o).status), int(Status::NotConverged));
         o = Options{}; o.timeLimitSeconds = 1e-9;
         QCOMPARE(int(solver.run(Parameters{}, o).status), int(Status::NotConverged));
+    }
+    void minimumProgramInterval() {
+        Parameters p; p.turnTime = p.verticalTime + 0.001;
+        QEXPECT_FAIL("", "Regression: binary rounding rejects the documented minimum interval; step 3.", Continue);
+        QVERIFY(validate(p, Options{}).empty());
+        p.turnTime = p.verticalTime + 0.000999;
+        QVERIFY(!validate(p, Options{}).empty());
+    }
+    void derivedStageDurationMustBePositive() {
+        Parameters p; p.fuel[0] = 1e-300; p.exhaustVelocity[0] = 1e-300;
+        QEXPECT_FAIL("", "Regression: derived duration underflows to zero; step 3.", Continue);
+        QVERIFY(!validate(p, Options{}).empty());
+    }
+    void invalidSensitivityProbeDoesNotAbort() {
+        Parameters p; p.turnTime = 580; p.turnDegrees = 12.985755371093751;
+        Options o; o.maxStep = 0.1; o.optimize = false;
+        QCOMPARE(solver.run(p, o).status, Status::Completed);
+        o.optimize = true;
+        const auto r = solver.run(p, o);
+        QEXPECT_FAIL("", "Regression: a failed forward probe aborts optimization; step 4.", Continue);
+        QVERIFY(r.status != Status::NumericalFailure);
     }
 };
 QTEST_APPLESS_MAIN(CoreTests)

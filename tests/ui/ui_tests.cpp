@@ -9,6 +9,7 @@
 #include <QScrollBar>
 #include <QWheelEvent>
 #include <QFont>
+#include <QCheckBox>
 #include "thememanager.h"
 #ifdef Q_OS_WIN
 #define NOMINMAX
@@ -194,6 +195,27 @@ private slots:
         window.findChild<NumberEdit *>("maxStep")->setValue(0);
         window.startCalculation(); QCOMPARE(finished.count(), 3); QVERIFY(!finished[2][0].toBool());
         QCOMPARE(window.lastResult().trajectory.back().velocity, before);
+    }
+    void pendingInputIsUsed_data() {
+        QTest::addColumn<bool>("shortcut");
+        QTest::newRow("button") << false;
+        QTest::newRow("shortcut") << true;
+    }
+    void pendingInputIsUsed() {
+        QFETCH(bool, shortcut);
+        MainWindow window; window.setAttribute(Qt::WA_DontShowOnScreen); window.show();
+        QApplication::setActiveWindow(&window); QApplication::processEvents();
+        window.findChild<QCheckBox *>("optimize")->setChecked(false);
+        auto *field = window.findChild<NumberEdit *>("targetAltitude");
+        field->setFocus(); field->selectAll(); QTest::keyClicks(field, "200");
+        QCOMPARE(field->value(), 250.0); QVERIFY(field->hasFocus());
+        QSignalSpy finished(&window, &MainWindow::calculationFinished);
+        if (shortcut) QTest::keyClick(field, Qt::Key_Return, Qt::ControlModifier);
+        else QTest::mouseClick(window.findChild<QPushButton *>("startButton"), Qt::LeftButton);
+        QTRY_COMPARE(finished.count(), 1);
+        QVERIFY(finished[0][0].toBool());
+        if (shortcut) QEXPECT_FAIL("shortcut", "Regression: shortcut reads stale spinbox value; step 2.", Continue);
+        QCOMPARE(window.lastResult().options.targetAltitude, 200000.0);
     }
     void closeWhileRunning() {
         MainWindow window; window.setAttribute(Qt::WA_DontShowOnScreen); window.show();
