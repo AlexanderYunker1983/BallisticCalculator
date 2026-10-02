@@ -17,6 +17,11 @@ public:
         setAlignment(Qt::AlignRight); setFocusPolicy(Qt::StrongFocus);
         setMinimumHeight(36);
     }
+    bool commitInput() {
+        if (!hasAcceptableInput()) return false;
+        interpretText();
+        return true;
+    }
 protected:
     void wheelEvent(QWheelEvent *event) override {
         if (hasFocus()) QDoubleSpinBox::wheelEvent(event);

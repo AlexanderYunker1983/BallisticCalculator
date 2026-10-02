@@ -214,8 +214,26 @@ private slots:
         else QTest::mouseClick(window.findChild<QPushButton *>("startButton"), Qt::LeftButton);
         QTRY_COMPARE(finished.count(), 1);
         QVERIFY(finished[0][0].toBool());
-        if (shortcut) QEXPECT_FAIL("shortcut", "Regression: shortcut reads stale spinbox value; step 2.", Continue);
         QCOMPARE(window.lastResult().options.targetAltitude, 200000.0);
+    }
+    void pendingInvalidInputIsRejected_data() {
+        QTest::addColumn<QString>("text");
+        QTest::newRow("zero-step") << QString("0");
+        QTest::newRow("unfinished") << QString();
+    }
+    void pendingInvalidInputIsRejected() {
+        QFETCH(QString, text);
+        MainWindow window; window.setAttribute(Qt::WA_DontShowOnScreen); window.show();
+        QApplication::setActiveWindow(&window); QApplication::processEvents();
+        auto *field = window.findChild<NumberEdit *>("maxStep");
+        field->setFocus(); field->selectAll();
+        QTest::keyClick(field, Qt::Key_Backspace);
+        if (!text.isEmpty()) QTest::keyClicks(field, text);
+        QSignalSpy finished(&window, &MainWindow::calculationFinished);
+        QTest::keyClick(field, Qt::Key_Return, Qt::ControlModifier);
+        QCOMPARE(finished.count(), 1); QVERIFY(!finished[0][0].toBool());
+        QVERIFY(!window.busy()); QVERIFY(window.lastResult().trajectory.empty());
+        QVERIFY(!window.findChild<QLabel *>("statusMessage")->text().isEmpty());
     }
     void closeWhileRunning() {
         MainWindow window; window.setAttribute(Qt::WA_DontShowOnScreen); window.show();

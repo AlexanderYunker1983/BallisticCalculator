@@ -84,6 +84,11 @@ ParametersDialog::ParametersDialog(const ballistic::Parameters &p, QWidget *pare
     buttons->button(QDialogButtonBox::Cancel)->setText(QString::fromUtf8("Отмена")); layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(buttons, &QDialogButtonBox::accepted, this, [this, fields, scroll] {
+        for (auto *field : fields) if (!field->commitInput()) {
+            field->setProperty("invalid", true); ThemeManager::repolish(field);
+            error_->setText(QString::fromUtf8("Завершите ввод числа в поле «%1».").arg(field->accessibleName()));
+            field->setFocus(); scroll->ensureWidgetVisible(field); return;
+        }
         NumberEdit *firstInvalid = nullptr;
         for (auto *field : fields) {
             const bool invalid = !(field->value() > 0) || !std::isfinite(field->value());

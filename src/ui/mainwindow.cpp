@@ -138,6 +138,15 @@ void MainWindow::setBusy(bool value) {
 }
 void MainWindow::startCalculation() {
     if (task_) return;
+    for (auto *field : {vertical_, turnTime_, angle_, target_, step_}) {
+        const bool valid = field->commitInput();
+        field->setProperty("invalid", !valid); ThemeManager::repolish(field);
+        if (!valid) {
+            status_->setProperty("tone", "error"); ThemeManager::repolish(status_);
+            status_->setText(QString::fromUtf8("Завершите ввод числа в поле «%1».").arg(field->accessibleName()));
+            field->setFocus(); emit calculationFinished(false); return;
+        }
+    }
     const auto p = inputParameters();
     ballistic::Options o; o.maxStep = step_->value(); o.targetAltitude = target_->value() * 1000; o.optimize = optimize_->isChecked();
     const auto error = ballistic::validate(p, o);
