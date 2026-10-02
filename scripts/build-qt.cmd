@@ -15,7 +15,9 @@ if not defined QT_DIR set "QT_DIR=C:\Qt\Qt5.11.1\5.11.1\msvc2017_64"
 if not defined VCVARS64 set "VCVARS64=C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
 if not defined VC_REDIST_DIR set "VC_REDIST_DIR=C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Redist\MSVC\14.16.27012\x64\Microsoft.VC141.CRT"
 set "BUILD=%REPO%\artifacts\qt-release"
-set "DIST=%REPO%\dist\Release"
+set "STAGE=%REPO%\dist\staging-%RANDOM%-%RANDOM%"
+set "DIST=%STAGE%\Release"
+for %%G in (git.exe) do set "GIT_EXE=%%~$PATH:G"
 set "POWERSHELL=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 if not exist "%QT_DIR%\bin\qmake.exe" (echo Qt qmake not found. Set QT_DIR. & exit /b 1)
 if not exist "%QT_DIR%\bin\windeployqt.exe" (echo Qt deployment tool not found. Set QT_DIR. & exit /b 1)
@@ -31,6 +33,9 @@ if /i "%~1"=="--rebuild" (
     if errorlevel 1 exit /b 1
 )
 "%QT_DIR%\bin\qmake.exe" -v
+if not exist "%BUILD%" mkdir "%BUILD%"
+"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -File "%REPO%\scripts\snapshot-sources.ps1" -Output "%BUILD%\source-inputs.json"
+if errorlevel 1 exit /b 1
 call :build native "%REPO%\BallisticCalculator.pro"
 if errorlevel 1 exit /b 1
 pushd "%BUILD%\native\tests\core"
@@ -45,7 +50,7 @@ set "TEST_RESULT=%ERRORLEVEL%"
 type ui-tests.txt
 popd
 if not "%TEST_RESULT%"=="0" exit /b %TEST_RESULT%
-"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -File "%REPO%\scripts\clean-qt.ps1" -Target Release
+"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -File "%REPO%\tests\scripts\release_tests.ps1"
 if errorlevel 1 exit /b 1
 mkdir "%DIST%"
 if errorlevel 1 exit /b 1
@@ -79,9 +84,11 @@ BallisticCalculator.exe -platform windows --smoke-test "%BUILD%\screenshots"
 set "TEST_RESULT=%ERRORLEVEL%"
 popd
 if not "%TEST_RESULT%"=="0" exit /b %TEST_RESULT%
-"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -File "%REPO%\scripts\package-qt.ps1" -DistributionDirectory "%DIST%"
+"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -File "%REPO%\scripts\package-qt.ps1" -DistributionDirectory "%DIST%" -QtDirectory "%QT_DIR%" -GitExecutable "%GIT_EXE%" -ExpectedSourceManifest "%BUILD%\source-inputs.json"
 if errorlevel 1 exit /b 1
-echo Ready: %DIST%\BallisticCalculator.exe
+"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -File "%REPO%\scripts\publish-qt.ps1" -StagingDirectory "%STAGE%"
+if errorlevel 1 exit /b 1
+echo Ready: %REPO%\dist\Release\BallisticCalculator.exe
 exit /b 0
 
 :build

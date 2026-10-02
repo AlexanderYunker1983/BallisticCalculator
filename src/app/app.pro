@@ -8,4 +8,5 @@ isEmpty(BALLISTIC_CORE_BUILD): BALLISTIC_CORE_BUILD = $$clean_path($$OUT_PWD/../
 include(../core/link.pri)
 include(../ui/ui.pri)
 SOURCES += $$PWD/main.cpp
+HEADERS += $$PWD/version.h
 DISTFILES += $$PWD/qt.conf

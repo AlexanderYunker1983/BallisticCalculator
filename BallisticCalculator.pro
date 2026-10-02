@@ -16,3 +16,5 @@ DISTFILES += README.md LICENSE NOTICE .gitignore build-release.cmd rebuild-relea
     docs/user-guide.ru.md docs/core-api.ru.md docs/ui-design.ru.md \
     scripts/build-qt.cmd scripts/clean-qt.ps1 scripts/package-qt.ps1 scripts/qt-license-notices.ps1
 DISTFILES += scripts/reference-solver.py docs/numerical-validation.ru.md docs/refactoring-validation.ru.md
+DISTFILES += scripts/source-files.ps1 scripts/snapshot-sources.ps1 scripts/release-functions.ps1 \
+    scripts/publish-qt.ps1 scripts/verify-release.ps1 tests/scripts/release_tests.ps1 docs/release-validation.ru.md

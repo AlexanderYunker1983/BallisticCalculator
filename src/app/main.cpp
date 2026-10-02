@@ -5,6 +5,7 @@
 #include <QTimer>
 #include <cstdio>
 #include "mainwindow.h"
+#include "version.h"
 #include "parametersdialog.h"
 #include "thememanager.h"
 #include <QDir>
@@ -13,7 +14,7 @@ int main(int argc, char *argv[]) {
     QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
     QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
     QApplication app(argc, argv);
-    app.setApplicationName(QString::fromUtf8("BallisticCalculator")); app.setApplicationVersion(QString::fromUtf8("2.0.0"));
+    app.setApplicationName(QString::fromUtf8("BallisticCalculator")); app.setApplicationVersion(QString::fromUtf8(BALLISTIC_VERSION));
     app.setFont(QFont(QString::fromUtf8("Segoe UI"), 10));
     QCommandLineParser parser; parser.addHelpOption(); parser.addVersionOption();
     QCommandLineOption smoke(QString::fromUtf8("smoke-test"), QString::fromUtf8("Calculate, save all tab screenshots and exit."), QString::fromUtf8("directory"));
