@@ -206,7 +206,6 @@ private slots:
         QFETCH(bool, shortcut);
         MainWindow window; window.setAttribute(Qt::WA_DontShowOnScreen); window.show();
         QApplication::setActiveWindow(&window); QApplication::processEvents();
-        window.findChild<QCheckBox *>("optimize")->setChecked(false);
         auto *field = window.findChild<NumberEdit *>("targetAltitude");
         field->setFocus(); field->selectAll(); QTest::keyClicks(field, "200");
         QCOMPARE(field->value(), 250.0); QVERIFY(field->hasFocus());
@@ -216,6 +215,29 @@ private slots:
         QTRY_COMPARE(finished.count(), 1);
         QVERIFY(finished[0][0].toBool());
         QCOMPARE(window.lastResult().options.targetAltitude, 200000.0);
+        const auto &result = window.lastResult();
+        QVERIFY(std::abs(result.trajectory.back().radius - ballistic::EarthRadius - 200000) <= result.options.altitudeTolerance);
+        QVERIFY(result.parameters.remainingFuel() > 0);
+        QVERIFY(window.findChild<QLabel *>("cutoffResult")->text().contains(QString::fromUtf8("Остаток топлива")));
+        QVERIFY(window.findChild<NumberEdit *>("engineCutoffTime")->value() > 0);
+    }
+    void manualCutoffAndRetarget() {
+        MainWindow window; window.setAttribute(Qt::WA_DontShowOnScreen); window.show();
+        auto *cutoff = window.findChild<NumberEdit *>("engineCutoffTime");
+        auto *optimize = window.findChild<QCheckBox *>("optimize");
+        QSignalSpy finished(&window, &MainWindow::calculationFinished);
+        optimize->setChecked(false); cutoff->setValue(570.125);
+        window.startCalculation(); QTRY_COMPARE(finished.count(), 1); QVERIFY(finished[0][0].toBool());
+        QCOMPARE(window.lastResult().trajectory.back().time, 570.125);
+        cutoff->setValue(1);
+        window.startCalculation(); QCOMPARE(finished.count(), 2); QVERIFY(!finished[1][0].toBool());
+        QVERIFY(cutoff->property("invalid").toBool());
+        cutoff->setValue(0); optimize->setChecked(true);
+        window.findChild<NumberEdit *>("targetAltitude")->setValue(200);
+        window.startCalculation(); QTRY_COMPARE(finished.count(), 3); QVERIFY(finished[2][0].toBool());
+        window.findChild<NumberEdit *>("targetAltitude")->setValue(250);
+        window.startCalculation(); QTRY_COMPARE(finished.count(), 4); QVERIFY(finished[3][0].toBool());
+        QVERIFY(std::abs(window.lastResult().trajectory.back().radius - ballistic::EarthRadius - 250000) <= 100);
     }
     void pendingInvalidInputIsRejected_data() {
         QTest::addColumn<QString>("text");

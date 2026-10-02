@@ -17,6 +17,7 @@ inline QString inputObjectName(const ballistic::ValidationIssue &issue) {
     case InputField::TurnDegrees: name = "turnAngle"; break;
     case InputField::MaxStep: name = "maxStep"; break;
     case InputField::TargetAltitude: name = "targetAltitude"; break;
+    case InputField::EngineCutoffTime: name = "engineCutoffTime"; break;
     default: break;
     }
     const auto result = QString::fromLatin1(name);

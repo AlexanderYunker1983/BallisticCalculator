@@ -18,6 +18,8 @@ PlotData preparePlotData(const ballistic::Result &result, const ballistic::Cance
         if (cancelled && cancelled()) return {};
         plots.series[i] = PlotSeries(std::move(data[i]));
     }
-    for (double time : result.parameters.separationTimes()) plots.events.append(time);
+    for (double time : result.parameters.separationTimes())
+        if (time < result.parameters.duration()) plots.events.append(time);
+    plots.events.append(result.parameters.duration());
     return plots;
 }

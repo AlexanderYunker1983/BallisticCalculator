@@ -104,7 +104,8 @@ void TrajectoryPlot::paintStatic(QPainter &painter) {
         const double x = screenPoint({separations_[i], 0}).x();
         painter.drawLine(QPointF(x, area.top()), QPointF(x, area.bottom()));
         const double labelX = std::max(area.left() + 4, std::min(x + 4, area.right() - 58));
-        painter.drawText(QRectF(labelX, area.top() + 4, 54, 20), QString::fromUtf8("%1-я ст.").arg(i + 1));
+        const auto label = i == 2 ? QString::fromUtf8("Выкл.") : QString::fromUtf8("%1-я ст.").arg(i + 1);
+        painter.drawText(QRectF(labelX, area.top() + 4, 54, 20), label);
     }
     rebuildGeometry();
     painter.setPen(QPen(colors.color(QPalette::Highlight), 1.8));

@@ -58,14 +58,17 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     angle_ = addInput(QString::fromUtf8("Угол поворота, °"), "turnAngle", 90, parameters_.turnDegrees, 2);
     target_ = addInput(QString::fromUtf8("Целевая высота, км"), "targetAltitude", 300, 250, 3);
     step_ = addInput(QString::fromUtf8("Шаг расчёта, с"), "maxStep", 1, 0.01, 4);
+    cutoff_ = addInput(QString::fromUtf8("Выключение двигателя, с"), "engineCutoffTime", 86400, 0, 5);
+    cutoff_->setSpecialValueText(QString::fromUtf8("Всё топливо"));
+    cutoff_->setToolTip(QString::fromUtf8("Время от старта для последней ступени; 0 — выработка всего топлива. При подборе это начальное приближение."));
     vertical_->setToolTip(QString::fromUtf8("t₀ — длительность вертикального участка от старта"));
     turnTime_->setToolTip(QString::fromUtf8("t₁ — время выхода на заданный угол; должно быть больше t₀"));
     angle_->setToolTip(QString::fromUtf8("φ₁ — угол программы полёта в момент t₁"));
     step_->setToolTip(QString::fromUtf8("Максимальный шаг интегрирования: от 0,000001 до 1 с"));
     step_->setSingleStep(0.001); angle_->setSingleStep(0.1); programLayout->addWidget(inputs_);
     auto *actions = new QHBoxLayout;
-    optimize_ = new QCheckBox(QString::fromUtf8("Подбирать угол и время поворота")); optimize_->setObjectName("optimize"); optimize_->setChecked(true);
-    optimize_->setToolTip(QString::fromUtf8("Подобрать φ₁ и t₁ по конечной высоте и модулю скорости"));
+    optimize_ = new QCheckBox(QString::fromUtf8("Подбирать параметры полёта")); optimize_->setObjectName("optimize"); optimize_->setChecked(true);
+    optimize_->setToolTip(QString::fromUtf8("Подобрать угол, время поворота и выключения двигателя по конечной высоте и модулю скорости"));
     start_ = new QPushButton(QString::fromUtf8("Рассчитать")); start_->setObjectName("startButton"); start_->setProperty("uiRole", "primary");
     start_->setToolTip(QString::fromUtf8("Начать расчёт · Ctrl+Enter"));
     cancel_ = new QPushButton(QString::fromUtf8("Остановить")); cancel_->setObjectName("cancelButton");
@@ -85,6 +88,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     velocity_ = card(QString::fromUtf8("Скорость / целевая"), "velocityResult", 2);
     details_ = card(QString::fromUtf8("Показанный расчёт"), "calculationDetails", 1);
     layout->addLayout(summary);
+    cutoffResult_ = new QLabel; cutoffResult_->setObjectName("cutoffResult"); cutoffResult_->setWordWrap(true);
+    cutoffResult_->setProperty("uiRole", "muted"); layout->addWidget(cutoffResult_);
 
     auto *chartTools = new QHBoxLayout;
     auto *chartHeading = new QLabel(QString::fromUtf8("Результаты полёта")); chartHeading->setProperty("uiRole", "section");
@@ -123,7 +128,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     });
     QWidget::setTabOrder(edit_, vertical_); QWidget::setTabOrder(vertical_, turnTime_);
     QWidget::setTabOrder(turnTime_, angle_); QWidget::setTabOrder(angle_, target_);
-    QWidget::setTabOrder(target_, step_); QWidget::setTabOrder(step_, optimize_);
+    QWidget::setTabOrder(target_, step_); QWidget::setTabOrder(step_, cutoff_); QWidget::setTabOrder(cutoff_, optimize_);
     QWidget::setTabOrder(optimize_, start_); QWidget::setTabOrder(start_, cancel_);
     controller_ = new CalculationController(this);
     connect(controller_, &CalculationController::progress, this, [this](int iteration, double h, double v) {
@@ -139,7 +144,8 @@ MainWindow::~MainWindow() {
     delete controller_;
 }
 ballistic::Parameters MainWindow::inputParameters() const {
-    auto p = parameters_; p.verticalTime = vertical_->value(); p.turnTime = turnTime_->value(); p.turnDegrees = angle_->value(); return p;
+    auto p = parameters_; p.verticalTime = vertical_->value(); p.turnTime = turnTime_->value(); p.turnDegrees = angle_->value();
+    p.engineCutoffTime = cutoff_->value(); return p;
 }
 void MainWindow::setBusy(bool value) {
     start_->setEnabled(!value); cancel_->setEnabled(value); edit_->setEnabled(!value);
@@ -147,7 +153,7 @@ void MainWindow::setBusy(bool value) {
 }
 void MainWindow::startCalculation() {
     if (busy()) return;
-    for (auto *field : {vertical_, turnTime_, angle_, target_, step_}) {
+    for (auto *field : {vertical_, turnTime_, angle_, target_, step_, cutoff_}) {
         const bool valid = field->commitInput();
         field->setProperty("invalid", !valid); ThemeManager::repolish(field);
         if (!valid) {
@@ -190,8 +196,11 @@ void MainWindow::finishCalculation() {
 void MainWindow::applyResult(PlotData plots) {
     parameters_ = result_.parameters;
     turnTime_->setValue(parameters_.turnTime); angle_->setValue(parameters_.turnDegrees);
+    cutoff_->setValue(parameters_.duration() < parameters_.separationTimes()[2] - 0.000001 ? parameters_.engineCutoffTime : 0);
     const auto &last = result_.trajectory.back();
     const auto locale = QLocale();
+    cutoffResult_->setText(QString::fromUtf8("Выключение двигателя: %1 с от старта · Остаток топлива III ступени: %2 кг")
+        .arg(locale.toString(last.time, 'f', 3), locale.toString(parameters_.remainingFuel(), 'f', 3)));
     altitude_->setText(locale.toString((last.radius - ballistic::EarthRadius) / 1000, 'f', 3) + QString::fromUtf8(" км"));
     velocity_->setText(QString::fromUtf8("%1 / %2 м/с").arg(locale.toString(last.velocity, 'f', 3),
         locale.toString(ballistic::orbitalSpeed(result_.options.targetAltitude), 'f', 3)));

@@ -16,17 +16,18 @@ Sample integrate(const PreparedModel &model, const Atmosphere &air, RunContext &
     double time = 0;
     const auto &p = model.parameters();
     const auto &times = model.separationTimes();
-    std::vector<double> events{p.verticalTime, p.turnTime, times[0], times[1], times[2]};
+    const double end = model.duration();
+    std::vector<double> events{p.verticalTime, p.turnTime, times[0], times[1], end};
     std::sort(events.begin(), events.end());
     events.erase(std::unique(events.begin(), events.end()), events.end());
     std::size_t nextEvent = 0, steps = 0;
     Sample sample = dynamics.sample(time, state);
     if (output) { output->clear(); output->reserve(std::min<std::size_t>(200000, ctx.o.maxSteps)); output->push_back(sample); }
-    while (time < times[2]) {
+    while (time < end) {
         if ((steps & 127) == 0) ctx.check();
         if (++steps > ctx.o.maxSteps) throw Stop{Status::NotConverged, "Достигнут предел шагов интегрирования.", StopReason::StepLimit};
         while (nextEvent < events.size() && events[nextEvent] <= time) ++nextEvent;
-        const double boundary = nextEvent < events.size() ? events[nextEvent] : times[2];
+        const double boundary = nextEvent < events.size() ? events[nextEvent] : end;
         double dt = std::min(ctx.o.maxStep, 10 / std::max(1.0, state[0]));
         const bool reachesEvent = time + dt >= boundary;
         if (reachesEvent) dt = boundary - time;

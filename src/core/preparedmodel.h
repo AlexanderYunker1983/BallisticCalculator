@@ -9,13 +9,13 @@ public:
     explicit PreparedModel(const Parameters &parameters);
     const Parameters &parameters() const { return parameters_; }
     const std::array<double, 3> &separationTimes() const { return times_; }
-    double duration() const { return times_[2]; }
+    double duration() const { return endTime_; }
     int stageAt(double time) const;
     double mass(double time, int stage) const;
     double angle(double time) const;
 private:
     Parameters parameters_;
     std::array<double, 3> times_, startingMass_;
-    double phi_, slope_, quadratic_;
+    double endTime_, phi_, slope_, quadratic_;
 };
 }

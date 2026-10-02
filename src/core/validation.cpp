@@ -44,6 +44,11 @@ ValidationIssue validateVehicle(const Parameters &p) {
     return {};
 }
 ValidationIssue validateProgram(const Parameters &p) {
+    const auto times = p.separationTimes();
+    if (!std::isfinite(p.engineCutoffTime) || p.engineCutoffTime < 0 ||
+        (p.engineCutoffTime > 0 && (!sufficientInterval(times[1], p.engineCutoffTime) || p.engineCutoffTime > times[2])))
+        return issue(ValidationCode::CutoffTime, InputField::EngineCutoffTime,
+                     "Выключение двигателя: 0 — выработка топлива; иначе время должно быть после начала третьей ступени (не менее 0,001 с) и не позже выработки топлива.");
     if (!std::isfinite(p.verticalTime) || p.verticalTime < 0)
         return issue(ValidationCode::TimeOrder, InputField::VerticalTime, "Длительность вертикального участка должна быть конечной и неотрицательной.");
     const double end = p.duration();

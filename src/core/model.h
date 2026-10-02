@@ -22,9 +22,11 @@ struct Parameters {
     double verticalTime = 40;
     double turnTime = 310;
     double turnDegrees = 14.97;
+    double engineCutoffTime = 0; // Seconds from launch; 0 means complete fuel exhaustion.
     ProgramDomain programDomain = ProgramDomain::Bounded;
     std::array<double, 3> separationTimes() const;
-    double duration() const { return separationTimes()[2]; }
+    double duration() const { return engineCutoffTime > 0 ? engineCutoffTime : separationTimes()[2]; }
+    double remainingFuel() const; // Last stage, retained on board after an early cutoff.
     double totalMass() const;
 };
 
@@ -54,7 +56,7 @@ struct Diagnostics {
 struct Sample {
     double time = 0, velocity = 0, theta = Pi / 2, radius = EarthRadius, arc = 0;
     double phi = Pi / 2, alpha = 0, mass = 0, acceleration = 0;
-    double density = 0, mach = 0, overload = 0;
+    double density = 0, mach = 0, overload = 0, thrust = 0;
 };
 struct Result {
     Status status = Status::InvalidInput;
@@ -71,12 +73,12 @@ using CancelCheck = std::function<bool()>;
 using Progress = std::function<void(int, double, double)>;
 enum class ValidationCode {
     None, PositiveFinite, FuelMass, StageDuration, TotalMass, StartThrust,
-    TimeOrder, AngleRange, ProgramRange, StepRange, TargetRange, Limit
+    TimeOrder, AngleRange, ProgramRange, StepRange, TargetRange, Limit, CutoffTime
 };
 enum class InputField {
     None, Payload, Mass, Fuel, Thrust, ExhaustVelocity, VerticalTime, TurnTime,
     TurnDegrees, MaxStep, TargetAltitude, AltitudeTolerance, VelocityTolerance,
-    MaxIterations, MaxEvaluations, MaxSteps, TimeLimit
+    MaxIterations, MaxEvaluations, MaxSteps, TimeLimit, EngineCutoffTime
 };
 struct ValidationIssue {
     ValidationCode code = ValidationCode::None;

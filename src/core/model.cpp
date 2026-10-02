@@ -17,6 +17,9 @@ std::array<double, 3> Parameters::separationTimes() const {
 double Parameters::totalMass() const {
     return std::accumulate(mass.begin(), mass.end(), payload);
 }
+double Parameters::remainingFuel() const {
+    return std::max(0.0, (separationTimes()[2] - duration()) * thrust[2] / exhaustVelocity[2]);
+}
 double programAngle(const Parameters &p, double t) {
     if (t <= p.verticalTime) return Pi / 2;
     const double end = p.duration();

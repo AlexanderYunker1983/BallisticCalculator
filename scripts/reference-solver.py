@@ -29,6 +29,7 @@ CASES = [
     ('turn_250', 3000, 40, 250, 20),
     ('angle_5', 3000, 40, 310, 5),
     ('angle_30', 3000, 40, 310, 30),
+    ('early_cutoff', 3000, 40, 310, 14.97, 570.123456789),
 ]
 
 
@@ -66,8 +67,8 @@ def air(height):
 
 
 def equations(case, stage):
-    _, payload, t0, t1, degrees = case
-    phi1, end = math.radians(degrees), TIMES[-1]
+    _, payload, t0, t1, degrees = case[:5]
+    phi1, end = math.radians(degrees), case[5] if len(case) > 5 else TIMES[-1]
     slope = -phi1 / (end - t1)
     quadratic = (math.pi/2 - phi1 - slope*(t0-t1)) / (t0-t1)**2
     start = 0 if stage == 0 else TIMES[stage-1]
@@ -123,7 +124,8 @@ def integrate(rhs, begin, end, y, tolerance=1.0):
 
 def trajectory(case, tolerance):
     y, begin = [0, math.pi/2, R, 0], 0
-    boundaries = sorted(set([case[2], case[3], *TIMES]))
+    cutoff = case[5] if len(case) > 5 else TIMES[-1]
+    boundaries = sorted(set(t for t in [case[2], case[3], *TIMES, cutoff] if t <= cutoff))
     for end in boundaries:
         stage = bisect.bisect_right(TIMES, begin)
         if end > begin:
@@ -143,7 +145,7 @@ def main():
         coarse, fine = trajectory(case, .01), trajectory(case, .001)
         assert abs(coarse[0]-fine[0]) < .01 and abs(coarse[1]-fine[1]) < .0001, (case, coarse, fine)
         assert abs(coarse[2]-fine[2]) < 1e-9 and abs(coarse[3]-fine[3]) < 1e-10, (case, coarse, fine)
-        numbers = ', '.join(format(x, '.17g') for x in [*case[1:], *fine])
+        numbers = ', '.join(format(x, '.17g') for x in [*case[1:5], *fine, case[5] if len(case) > 5 else 0])
         lines.append('{"' + case[0] + '", ' + numbers + '},')
         print(case[0], fine, 'refinement', [a-b for a, b in zip(coarse, fine)], flush=True)
     content = '\n'.join(lines) + '\n'

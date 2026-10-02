@@ -32,11 +32,11 @@ private:
     ballistic::Result result_;
     CalculationController *controller_ = nullptr;
     bool closing_ = false;
-    NumberEdit *vertical_, *turnTime_, *angle_, *target_, *step_;
+    NumberEdit *vertical_, *turnTime_, *angle_, *target_, *step_, *cutoff_;
     QPushButton *start_, *cancel_, *edit_;
     QCheckBox *optimize_;
     QProgressBar *progress_;
-    QLabel *status_, *altitude_, *velocity_, *details_;
+    QLabel *status_, *altitude_, *velocity_, *details_, *cutoffResult_;
     QWidget *inputs_;
     QTabWidget *tabs_;
     TrajectoryPlot *plots_[7];

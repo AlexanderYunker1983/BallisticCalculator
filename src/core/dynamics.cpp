@@ -29,6 +29,7 @@ Sample Dynamics::evaluate(double t, const State &s, int stage, State *derivative
                        m <= 3.6 ? 2.85 + 0.350 * (m - 1.6) : 3.55;
     const double cy = (cya - cx) * q.alpha;
     const double thrust = stage < 3 ? model_.parameters().thrust[stage] : 0;
+    q.thrust = thrust;
     const double pressureArea = air.density * q.velocity * q.velocity * ReferenceArea / 2;
     const double axial = thrust - pressureArea * cx;
     const double lift = pressureArea * cy;

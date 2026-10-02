@@ -11,7 +11,7 @@ using namespace ballistic;
 namespace {
 struct ReferenceCase {
     const char *name;
-    double payload, verticalTime, turnTime, angle, altitude, velocity, theta, arc;
+    double payload, verticalTime, turnTime, angle, altitude, velocity, theta, arc, cutoff;
 };
 const ReferenceCase references[] = {
 #include "reference_cases.inc"
@@ -114,8 +114,9 @@ private slots:
                 QVERIFY(std::abs(s.mass - expected) < 1e-7);
             }
         }
-        for (int n : count) QCOMPARE(n, 1);
-        QCOMPARE(optimized.trajectory.back().time, times[2]);
+        for (int i = 0; i < 3; ++i) QCOMPARE(count[i], times[i] <= optimized.parameters.duration() ? 1 : 0);
+        QCOMPARE(optimized.trajectory.back().time, optimized.parameters.duration());
+        QCOMPARE(optimized.trajectory.back().thrust, 0.0);
     }
     void returnedInputsReproduceTrajectory() {
         QVERIFY(optimized.status == Status::Completed);
@@ -259,6 +260,7 @@ private slots:
         const auto &reference = references[scenario];
         Parameters p; p.payload = reference.payload; p.verticalTime = reference.verticalTime;
         p.turnTime = reference.turnTime; p.turnDegrees = reference.angle;
+        p.engineCutoffTime = reference.cutoff;
         Options o; o.optimize = false; o.maxStep = step;
         const auto r = solver.run(p, o); QVERIFY2(r.status == Status::Completed, r.message.c_str());
         const auto &last = r.trajectory.back();
@@ -307,7 +309,8 @@ private slots:
     }
     void optimizationTargetMatrix_data() {
         QTest::addColumn<double>("target");
-        for (double target : {240000.0, 250000.0, 260000.0}) QTest::newRow(qPrintable(QString::number(target))) << target;
+        for (double target : {180000.0, 200000.0, 220000.0, 240000.0, 250000.0, 260000.0, 300000.0})
+            QTest::newRow(qPrintable(QString::number(target))) << target;
     }
     void optimizationTargetMatrix() {
         QFETCH(double, target); Options o; o.targetAltitude = target;
@@ -315,6 +318,69 @@ private slots:
         QVERIFY(std::abs(r.trajectory.back().radius - EarthRadius - target) <= o.altitudeTolerance);
         QVERIFY(std::abs(r.trajectory.back().velocity - orbitalSpeed(target)) <= o.velocityTolerance);
         QVERIFY(validateProgram(r.parameters).empty());
+        qInfo("target=%.0f; H=%.6f; V=%.6f; cutoff=%.9f; fuel=%.6f; mass=%.6f; iterations=%d; evaluations=%d",
+              target, r.trajectory.back().radius - EarthRadius, r.trajectory.back().velocity,
+              r.parameters.duration(), r.parameters.remainingFuel(), r.trajectory.back().mass,
+              r.diagnostics.iterations, r.evaluations);
+        if (target <= 200000) {
+            QVERIFY(r.parameters.engineCutoffTime < r.parameters.separationTimes()[2]);
+            QVERIFY(r.parameters.remainingFuel() > 0);
+            QCOMPARE(r.trajectory.back().time, r.parameters.engineCutoffTime);
+            QVERIFY(std::abs(r.trajectory.back().mass - (r.parameters.payload + r.parameters.mass[2] -
+                          r.parameters.fuel[2] + r.parameters.remainingFuel())) < 1e-8);
+            o.optimize = false;
+            const auto replay = solver.run(r.parameters, o);
+            QCOMPARE(replay.status, Status::Completed);
+            QCOMPARE(replay.trajectory.back().radius, r.trajectory.back().radius);
+            QCOMPARE(replay.trajectory.back().velocity, r.trajectory.back().velocity);
+            o.maxStep = 0.005;
+            const auto fine = solver.run(r.parameters, o);
+            QCOMPARE(fine.status, Status::Completed);
+            QVERIFY(std::abs(fine.trajectory.back().radius - r.trajectory.back().radius) < 0.05);
+            QVERIFY(std::abs(fine.trajectory.back().velocity - r.trajectory.back().velocity) < 0.0001);
+        }
+    }
+    void earlyCutoffMassAndEvent() {
+        Parameters p; p.engineCutoffTime = 570.123456789;
+        const auto times = p.separationTimes();
+        const double remaining = p.fuel[2] - (p.engineCutoffTime - times[1]) * p.thrust[2] / p.exhaustVelocity[2];
+        const double mass = p.payload + p.mass[2] - p.fuel[2] + remaining;
+        Atmosphere air; Dynamics dynamics(p, air);
+        QCOMPARE(dynamics.stageAt(p.duration()), 3);
+        QVERIFY(std::abs(dynamics.mass(p.duration(), 3) - mass) < 1e-8);
+        QCOMPARE(dynamics.mass(p.duration() + 100, 3), dynamics.mass(p.duration(), 3));
+        QVERIFY(std::abs(p.remainingFuel() - remaining) < 1e-8);
+        Options o; o.optimize = false; o.maxStep = 0.1;
+        const auto r = solver.run(p, o); QVERIFY2(r.status == Status::Completed, r.message.c_str());
+        const auto &last = r.trajectory.back();
+        QCOMPARE(last.time, p.engineCutoffTime); QCOMPARE(last.thrust, 0.0);
+        QCOMPARE(last.phi, 0.0); QVERIFY(std::abs(last.mass - mass) < 1e-8);
+        const auto &previous = r.trajectory[r.trajectory.size() - 2];
+        QVERIFY(previous.thrust > 0);
+        QVERIFY(std::abs(previous.mass - (last.time - previous.time) * p.thrust[2] / p.exhaustVelocity[2] - last.mass) < 1e-8);
+        int cutoffs = 0;
+        for (const auto &sample : r.trajectory) {
+            QVERIFY(sample.time <= p.duration());
+            if (sample.time == p.duration()) ++cutoffs;
+        }
+        QCOMPARE(cutoffs, 1);
+        p.engineCutoffTime = times[2];
+        const auto full = solver.run(p, o);
+        QCOMPARE(full.status, Status::Completed);
+        QCOMPARE(full.trajectory.back().mass, p.payload); QCOMPARE(p.remainingFuel(), 0.0);
+        p.engineCutoffTime = 0;
+        const auto legacy = solver.run(p, o);
+        QCOMPARE(full.trajectory.back().velocity, legacy.trajectory.back().velocity);
+    }
+    void invalidCutoffTimes() {
+        Parameters p; Options o;
+        for (double time : {-1.0, std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(),
+                            p.separationTimes()[1], p.separationTimes()[1] + 0.0005, p.separationTimes()[2] + 0.001}) {
+            p.engineCutoffTime = time;
+            QCOMPARE(validateProgram(p).field, InputField::EngineCutoffTime);
+            const auto r = solver.run(p, o);
+            QCOMPARE(r.status, Status::InvalidInput); QCOMPARE(r.evaluations, 0);
+        }
     }
 };
 QTEST_APPLESS_MAIN(CoreTests)
