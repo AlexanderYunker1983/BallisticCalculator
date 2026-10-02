@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "mainwindow.h"
 #include "numberedit.h"
+#include "validationfield.h"
 #include "thememanager.h"
 #include <QFrame>
 #include <QScrollArea>
@@ -149,9 +150,16 @@ void MainWindow::startCalculation() {
     }
     const auto p = inputParameters();
     ballistic::Options o; o.maxStep = step_->value(); o.targetAltitude = target_->value() * 1000; o.optimize = optimize_->isChecked();
-    const auto error = ballistic::validate(p, o);
+    const auto issue = ballistic::validateDetailed(p, o);
+    const auto &error = issue.message;
     status_->setProperty("tone", error.empty() ? "normal" : "error"); ThemeManager::repolish(status_);
-    if (!error.empty()) { status_->setText(QString::fromUtf8(error.c_str())); emit calculationFinished(false); return; }
+    if (!error.empty()) {
+        status_->setText(QString::fromUtf8(error.c_str()));
+        if (auto *field = findChild<NumberEdit *>(inputObjectName(issue))) {
+            field->setProperty("invalid", true); ThemeManager::repolish(field); field->setFocus();
+        }
+        emit calculationFinished(false); return;
+    }
     status_->setText(QString::fromUtf8("Выполняется расчёт…")); setBusy(true);
     task_ = new CalculationTask(p, o, this);
     connect(task_, &CalculationTask::progress, this, [this](int iteration, double h, double v) {

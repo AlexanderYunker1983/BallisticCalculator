@@ -157,15 +157,38 @@ private slots:
     }
     void minimumProgramInterval() {
         Parameters p; p.turnTime = p.verticalTime + 0.001;
-        QEXPECT_FAIL("", "Regression: binary rounding rejects the documented minimum interval; step 3.", Continue);
         QVERIFY(validate(p, Options{}).empty());
         p.turnTime = p.verticalTime + 0.000999;
         QVERIFY(!validate(p, Options{}).empty());
     }
     void derivedStageDurationMustBePositive() {
         Parameters p; p.fuel[0] = 1e-300; p.exhaustVelocity[0] = 1e-300;
-        QEXPECT_FAIL("", "Regression: derived duration underflows to zero; step 3.", Continue);
         QVERIFY(!validate(p, Options{}).empty());
+    }
+    void structuredValidation() {
+        Parameters p; Options o;
+        p.fuel[1] = p.mass[1];
+        auto error = validateVehicle(p);
+        QCOMPARE(error.code, ValidationCode::FuelMass); QCOMPARE(error.field, InputField::Fuel); QCOMPARE(error.stage, 1);
+        p = Parameters{}; p.turnTime = p.verticalTime;
+        QVERIFY(validateVehicle(p).empty());
+        QCOMPARE(validateProgram(p).field, InputField::TurnTime);
+        p = Parameters{}; p.thrust[0] = 900000;
+        QCOMPARE(validateVehicle(p).code, ValidationCode::StartThrust);
+        p = Parameters{}; p.mass[0] = p.mass[1] = std::numeric_limits<double>::max();
+        QCOMPARE(validateVehicle(p).code, ValidationCode::TotalMass);
+        p = Parameters{}; p.exhaustVelocity[0] = 1e-308;
+        QCOMPARE(validateVehicle(p).code, ValidationCode::StageDuration);
+        p = Parameters{}; p.turnTime = p.duration() - 0.001;
+        QVERIFY(validateProgram(p).empty());
+        p.turnTime = p.duration() - 0.000999;
+        QVERIFY(!validateProgram(p).empty());
+        o.velocityTolerance = std::numeric_limits<double>::quiet_NaN();
+        QCOMPARE(validateOptions(o).field, InputField::VelocityTolerance);
+        o = Options{}; o.maxEvaluations = 0;
+        QCOMPARE(validateOptions(o).field, InputField::MaxEvaluations);
+        o = Options{}; o.maxStep = 1e-6; QVERIFY(validateOptions(o).empty());
+        o.maxStep = 1; QVERIFY(validateOptions(o).empty());
     }
     void invalidSensitivityProbeDoesNotAbort() {
         Parameters p; p.turnTime = 580; p.turnDegrees = 12.985755371093751;

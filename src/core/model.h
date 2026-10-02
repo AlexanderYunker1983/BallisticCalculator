@@ -56,6 +56,26 @@ struct Result {
 };
 using CancelCheck = std::function<bool()>;
 using Progress = std::function<void(int, double, double)>;
+enum class ValidationCode {
+    None, PositiveFinite, FuelMass, StageDuration, TotalMass, StartThrust,
+    TimeOrder, AngleRange, StepRange, TargetRange, Limit
+};
+enum class InputField {
+    None, Payload, Mass, Fuel, Thrust, ExhaustVelocity, VerticalTime, TurnTime,
+    TurnDegrees, MaxStep, TargetAltitude, AltitudeTolerance, VelocityTolerance,
+    MaxIterations, MaxEvaluations, MaxSteps, TimeLimit
+};
+struct ValidationIssue {
+    ValidationCode code = ValidationCode::None;
+    InputField field = InputField::None;
+    int stage = -1; // Zero-based; -1 for a non-stage field.
+    std::string message;
+    bool empty() const { return code == ValidationCode::None; }
+};
+ValidationIssue validateVehicle(const Parameters &p);
+ValidationIssue validateProgram(const Parameters &p);
+ValidationIssue validateOptions(const Options &o);
+ValidationIssue validateDetailed(const Parameters &p, const Options &o);
 std::string validate(const Parameters &p, const Options &o);
 double programAngle(const Parameters &p, double t);
 double orbitalSpeed(double altitude);

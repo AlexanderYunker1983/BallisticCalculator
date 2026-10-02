@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "parametersdialog.h"
 #include "numberedit.h"
+#include "validationfield.h"
 #include "thememanager.h"
 #include <QDialogButtonBox>
 #include <QFrame>
@@ -89,22 +90,16 @@ ParametersDialog::ParametersDialog(const ballistic::Parameters &p, QWidget *pare
             error_->setText(QString::fromUtf8("Завершите ввод числа в поле «%1».").arg(field->accessibleName()));
             field->setFocus(); scroll->ensureWidgetVisible(field); return;
         }
-        NumberEdit *firstInvalid = nullptr;
         for (auto *field : fields) {
-            const bool invalid = !(field->value() > 0) || !std::isfinite(field->value());
-            field->setProperty("invalid", invalid); ThemeManager::repolish(field);
-            if (invalid && !firstInvalid) firstInvalid = field;
+            field->setProperty("invalid", false); ThemeManager::repolish(field);
         }
-        for (int i = 0; i < 3; ++i) if (fuel_[i]->value() >= mass_[i]->value()) {
-            fuel_[i]->setProperty("invalid", true); ThemeManager::repolish(fuel_[i]);
-            if (!firstInvalid) firstInvalid = fuel_[i];
+        const auto issue = ballistic::validateVehicle(parameters());
+        error_->setText(QString::fromUtf8(issue.message.c_str()));
+        if (issue.empty()) { accept(); return; }
+        if (auto *field = findChild<NumberEdit *>(inputObjectName(issue))) {
+            field->setProperty("invalid", true); ThemeManager::repolish(field);
+            field->setFocus(); field->selectAll(); scroll->ensureWidgetVisible(field);
         }
-        // Only vehicle data is edited here. Program times are checked at launch.
-        auto vehicle = parameters(); vehicle.verticalTime = 0; vehicle.turnTime = vehicle.duration() / 2;
-        const auto error = ballistic::validate(vehicle, ballistic::Options{});
-        error_->setText(QString::fromUtf8(error.c_str()));
-        if (firstInvalid) { firstInvalid->setFocus(); firstInvalid->selectAll(); scroll->ensureWidgetVisible(firstInvalid); }
-        if (error.empty()) accept();
     });
     QWidget *previous = payload_;
     for (int i = 0; i < 3; ++i) for (auto *field : {mass_[i], fuel_[i], thrust_[i], exhaust_[i]}) {
