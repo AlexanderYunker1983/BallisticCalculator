@@ -113,6 +113,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         plots_[i] = new TrajectoryPlot(titles[i], i == 6 ? QString::fromUtf8("S, км") : QString::fromUtf8("t, с"), units[i]);
         plots_[i]->setObjectName(QString::fromUtf8("plot%1").arg(i));
     }
+    plots_[4]->setLowerThreshold(1.0);
     auto addTab = [&](const QString &name, int first, int second) {
         auto *page = new QWidget; auto *row = new QHBoxLayout(page); row->setContentsMargins(1, 1, 1, 1);
         row->setSpacing(1); row->addWidget(plots_[first]); if (second >= 0) row->addWidget(plots_[second]); tabs_->addTab(page, name);

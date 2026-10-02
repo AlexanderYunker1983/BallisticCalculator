@@ -13,6 +13,7 @@ public:
     TrajectoryPlot(QString title, QString xLabel, QString yLabel, QWidget *parent = nullptr);
     void setData(QVector<QPointF> points, const QVector<double> &separations = {});
     void setSeries(PlotSeries series, const QVector<double> &separations = {});
+    void setLowerThreshold(double level);
     int pointCount() const { return series_.points().size(); }
     quint64 geometryBuildCount() const { return geometryBuilds_; }
     int geometryPointCount() const { return geometry_.size(); }
@@ -44,6 +45,8 @@ private:
     QRectF sceneView_;
     QSize sceneSize_;
     bool sceneDirty_ = true;
+    bool hasLowerThreshold_ = false;
+    double lowerThreshold_ = 0;
     QRectF plotRect() const;
     QPointF screenPoint(const QPointF &p) const;
 };

@@ -25,6 +25,10 @@ TrajectoryPlot::TrajectoryPlot(QString title, QString xLabel, QString yLabel, QW
 void TrajectoryPlot::setData(QVector<QPointF> points, const QVector<double> &separations) {
     setSeries(PlotSeries(std::move(points)), separations);
 }
+void TrajectoryPlot::setLowerThreshold(double level) {
+    lowerThreshold_ = level; hasLowerThreshold_ = std::isfinite(level);
+    sceneDirty_ = true; update();
+}
 void TrajectoryPlot::setSeries(PlotSeries series, const QVector<double> &separations) {
     series_ = std::move(series); separations_ = separations; geometryDirty_ = true; sceneDirty_ = true;
     if (series_.points().isEmpty()) { full_ = {}; view_ = {}; geometry_.clear(); update(); return; }
@@ -77,6 +81,14 @@ void TrajectoryPlot::paintStatic(QPainter &painter) {
             QString::fromUtf8("Нажмите «Рассчитать», чтобы построить траекторию")); return;
     }
     const auto area = plotRect();
+    const QColor thresholdColor(220, 38, 38);
+    const double thresholdY = screenPoint({view_.left(), lowerThreshold_}).y();
+    if (hasLowerThreshold_) {
+        // Clamp to the viewport: below the threshold may cover all or none of it.
+        const double fillTop = std::max(area.top(), std::min(area.bottom(), thresholdY));
+        QColor fill = thresholdColor; fill.setAlpha(48);
+        painter.fillRect(QRectF(area.left(), fillTop, area.width(), area.bottom() - fillTop), fill);
+    }
     const double xStep = tickStep(view_.width(), int(area.width() / 105));
     const double yStep = tickStep(view_.height(), int(area.height() / 65));
     const double firstX = std::ceil(view_.left() / xStep) * xStep;
@@ -98,6 +110,10 @@ void TrajectoryPlot::paintStatic(QPainter &painter) {
     painter.save(); painter.translate(15, area.center().y()); painter.rotate(-90);
     painter.drawText(QRectF(-area.height() / 2, -12, area.height(), 24), Qt::AlignCenter, yLabel_); painter.restore();
     painter.save(); painter.setClipRect(area.adjusted(-1, -1, 1, 1));
+    if (hasLowerThreshold_ && thresholdY >= area.top() && thresholdY <= area.bottom()) {
+        painter.setPen(QPen(thresholdColor, 1.5));
+        painter.drawLine(QPointF(area.left(), thresholdY), QPointF(area.right(), thresholdY));
+    }
     painter.setPen(QPen(colors.color(QPalette::BrightText), 1, Qt::DashLine));
     for (int i = 0; i < separations_.size(); ++i) {
         if (separations_[i] < view_.left() || separations_[i] > view_.right()) continue;
