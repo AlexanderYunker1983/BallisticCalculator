@@ -190,6 +190,25 @@ private slots:
         o = Options{}; o.maxStep = 1e-6; QVERIFY(validateOptions(o).empty());
         o.maxStep = 1; QVERIFY(validateOptions(o).empty());
     }
+    void preparedModelAndFixedRegression() {
+        Parameters p;
+        const PreparedModel model(p);
+        for (double time : {0.0, 40.0, 100.0, 310.0, 500.0, p.duration()})
+            QCOMPARE(model.angle(time), programAngle(p, time));
+        const auto times = model.separationTimes();
+        QCOMPARE(model.stageAt(times[0]), 1);
+        QCOMPARE(model.mass(times[0], 1), p.payload + p.mass[1] + p.mass[2]);
+        QCOMPARE(model.mass(times[2], 3), p.payload);
+        QVERIFY_EXCEPTION_THROWN(model.mass(0, -1), std::invalid_argument);
+        QVERIFY_EXCEPTION_THROWN(model.mass(0, 4), std::invalid_argument);
+        p.payload = 4000; QCOMPARE(model.parameters().payload, 3000.0);
+        p = Parameters{}; p.turnTime = 353.527598424922; p.turnDegrees = 9.07661185847695;
+        Options o; o.optimize = false;
+        const auto r = solver.run(p, o);
+        QCOMPARE(r.status, Status::Completed);
+        QVERIFY(std::abs(r.trajectory.back().radius - EarthRadius - 249999.821605668) < 1e-5);
+        QVERIFY(std::abs(r.trajectory.back().velocity - 7753.71272168105) < 1e-7);
+    }
     void invalidSensitivityProbeDoesNotAbort() {
         Parameters p; p.turnTime = 580; p.turnDegrees = 12.985755371093751;
         Options o; o.maxStep = 0.1; o.optimize = false;

@@ -5,15 +5,10 @@
 
 namespace ballistic {
 int Dynamics::stageAt(double t) const {
-    for (int i = 0; i < 3; ++i) if (t < times_[i]) return i;
-    return 3;
+    return model_.stageAt(t);
 }
 double Dynamics::mass(double t, int stage) const {
-    if (stage == 3) return p_.payload;
-    double m = p_.payload;
-    for (int i = stage; i < 3; ++i) m += p_.mass[i];
-    const double start = stage == 0 ? 0 : times_[stage - 1];
-    return m - (t - start) * p_.thrust[stage] / p_.exhaustVelocity[stage];
+    return model_.mass(t, stage);
 }
 Sample Dynamics::evaluate(double t, const State &s, int stage, State *derivative) const {
     for (double value : s) if (!std::isfinite(value)) throw std::runtime_error("Неконечное состояние траектории.");
@@ -21,7 +16,7 @@ Sample Dynamics::evaluate(double t, const State &s, int stage, State *derivative
         throw std::runtime_error("Траектория вышла за область модели: падение или отрицательная скорость.");
     Sample q;
     q.time = t; q.velocity = s[0]; q.theta = s[1]; q.radius = s[2]; q.arc = s[3];
-    q.phi = programAngle(p_, t);
+    q.phi = model_.angle(t);
     q.alpha = q.phi - q.theta + q.arc;
     q.mass = mass(t, stage);
     if (!std::isfinite(q.mass) || q.mass <= 0) throw std::runtime_error("Неположительная масса в расчёте.");
@@ -33,7 +28,7 @@ Sample Dynamics::evaluate(double t, const State &s, int stage, State *derivative
                        m <= 1.6 ? 3.18 - 0.660 * (m - 1.1) :
                        m <= 3.6 ? 2.85 + 0.350 * (m - 1.6) : 3.55;
     const double cy = (cya - cx) * q.alpha;
-    const double thrust = stage < 3 ? p_.thrust[stage] : 0;
+    const double thrust = stage < 3 ? model_.parameters().thrust[stage] : 0;
     const double pressureArea = air.density * q.velocity * q.velocity * ReferenceArea / 2;
     const double axial = thrust - pressureArea * cx;
     const double lift = pressureArea * cy;
