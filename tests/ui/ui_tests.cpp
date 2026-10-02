@@ -10,6 +10,7 @@
 #include <QWheelEvent>
 #include <QFont>
 #include <QCheckBox>
+#include <QElapsedTimer>
 #include "thememanager.h"
 #ifdef Q_OS_WIN
 #define NOMINMAX
@@ -250,6 +251,47 @@ private slots:
         QTest::mouseDClick(&plot, Qt::LeftButton); QVERIFY(!plot.grab().isNull());
         plot.setData({{1, 1}, {1, 1}}); QVERIFY(!plot.grab().isNull());
         plot.setData({}); QVERIFY(!plot.grab().isNull());
+    }
+    void plotAggregationPreservesExtrema() {
+        QVector<QPointF> points;
+        for (int i = 0; i < 10000; ++i) points.append({double(i), 0});
+        points[1234].setY(100); points[1240].setY(-100);
+        PlotSeries series(points);
+        const auto selected = series.visibleIndices(0, 9999, 100);
+        QVERIFY(selected.contains(0)); QVERIFY(selected.contains(9999));
+        QVERIFY(selected.contains(1234)); QVERIFY(selected.contains(1240));
+        QVERIFY(std::is_sorted(selected.cbegin(), selected.cend()));
+        QVERIFY(selected.size() <= 408);
+        const auto zoom = series.visibleIndices(1230, 1250, 400);
+        QVERIFY(zoom.contains(1234)); QVERIFY(zoom.contains(1240));
+        QCOMPARE(series.nearestIndex(1234.1), 1234);
+        PlotSeries loop({{2, 0}, {0, 1}, {1, -1}, {0, 2}});
+        QCOMPARE(loop.nearestIndex(0), 1); QCOMPARE(loop.nearestIndex(1.1), 2);
+        const auto loopIndices = loop.visibleIndices(0, 2, 100);
+        QVERIFY(std::is_sorted(loopIndices.cbegin(), loopIndices.cend()));
+    }
+    void largePlotCachesGeometry() {
+        QVector<QPointF> points; points.reserve(2000000);
+        for (int i = 0; i < 2000000; ++i) points.append({double(i), std::sin(i * 0.001)});
+        QElapsedTimer timer; timer.start(); PlotSeries series(std::move(points));
+        const auto preparation = timer.nsecsElapsed(); const auto bytes = series.storageBytes();
+        TrajectoryPlot plot("Large", "x", "y"); plot.setAttribute(Qt::WA_DontShowOnScreen); plot.resize(800, 500); plot.show();
+        plot.setSeries(std::move(series), {12345}); timer.restart(); plot.grab();
+        const auto firstPaint = timer.nsecsElapsed(); const auto builds = plot.geometryBuildCount();
+        QVERIFY(plot.geometryPointCount() > 1); QVERIFY(plot.geometryPointCount() < 4000);
+        timer.restart();
+        for (int i = 0; i < 20; ++i) {
+            QMouseEvent hover(QEvent::MouseMove, QPointF(200 + i, 150), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+            QApplication::sendEvent(&plot, &hover); plot.grab();
+        }
+        qInfo("large plot: prepare=%.3f ms, first paint=%.3f ms, hover paint=%.3f ms, series=%lld bytes",
+              preparation / 1e6, firstPaint / 1e6, timer.nsecsElapsed() / 20e6, static_cast<long long>(bytes));
+        QCOMPARE(plot.geometryBuildCount(), builds);
+        plot.resize(900, 500); plot.grab(); QVERIFY(plot.geometryBuildCount() > builds);
+        const auto resized = plot.geometryBuildCount(); themes_->setMode(ThemeManager::Mode::Dark); plot.grab();
+        QCOMPARE(plot.geometryBuildCount(), resized);
+        QVERIFY(plot.grab().toImage().pixelColor(3, 3).lightness() < 70);
+        plot.setData({{0, 0}, {1, 1}}); plot.grab(); QVERIFY(plot.geometryBuildCount() > resized);
     }
 };
 QTEST_MAIN(UiTests)

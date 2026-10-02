@@ -8,7 +8,7 @@
 #include <QScreen>
 #include <QShortcut>
 #include "parametersdialog.h"
-#include "calculationtask.h"
+#include "calculationcontroller.h"
 #include "trajectoryplot.h"
 #include <QCheckBox>
 #include <QCloseEvent>
@@ -125,10 +125,18 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     QWidget::setTabOrder(turnTime_, angle_); QWidget::setTabOrder(angle_, target_);
     QWidget::setTabOrder(target_, step_); QWidget::setTabOrder(step_, optimize_);
     QWidget::setTabOrder(optimize_, start_); QWidget::setTabOrder(start_, cancel_);
+    controller_ = new CalculationController(this);
+    connect(controller_, &CalculationController::progress, this, [this](int iteration, double h, double v) {
+        if (!cancel_->isEnabled()) return;
+        status_->setText(QString::fromUtf8("Подбор: итерация %1 · ошибка высоты %2 м · ошибка скорости %3 м/с")
+            .arg(iteration).arg(QLocale().toString(h, 'f', 2)).arg(QLocale().toString(v, 'f', 3)));
+    });
+    connect(controller_, &CalculationController::finished, this, &MainWindow::finishCalculation);
+
     setBusy(false);
 }
 MainWindow::~MainWindow() {
-    if (task_) { task_->cancel(); task_->wait(); }
+    delete controller_;
 }
 ballistic::Parameters MainWindow::inputParameters() const {
     auto p = parameters_; p.verticalTime = vertical_->value(); p.turnTime = turnTime_->value(); p.turnDegrees = angle_->value(); return p;
@@ -138,7 +146,7 @@ void MainWindow::setBusy(bool value) {
     optimize_->setEnabled(!value); inputs_->setEnabled(!value); progress_->setVisible(value);
 }
 void MainWindow::startCalculation() {
-    if (task_) return;
+    if (busy()) return;
     for (auto *field : {vertical_, turnTime_, angle_, target_, step_}) {
         const bool valid = field->commitInput();
         field->setProperty("invalid", !valid); ThemeManager::repolish(field);
@@ -161,33 +169,25 @@ void MainWindow::startCalculation() {
         emit calculationFinished(false); return;
     }
     status_->setText(QString::fromUtf8("Выполняется расчёт…")); setBusy(true);
-    task_ = new CalculationTask(p, o, this);
-    connect(task_, &CalculationTask::progress, this, [this](int iteration, double h, double v) {
-        if (!cancel_->isEnabled()) return;
-        status_->setText(QString::fromUtf8("Подбор: итерация %1 · ошибка высоты %2 м · ошибка скорости %3 м/с")
-            .arg(iteration).arg(QLocale().toString(h, 'f', 2)).arg(QLocale().toString(v, 'f', 3)));
-    });
-    connect(task_, &QThread::finished, this, &MainWindow::finishCalculation);
-    task_->start();
+    controller_->start(p, o);
 }
 void MainWindow::cancelCalculation() {
-    if (!task_) return;
-    task_->cancel(); cancel_->setEnabled(false); status_->setText(QString::fromUtf8("Отмена расчёта…"));
+    if (!busy()) return;
+    controller_->cancel(); cancel_->setEnabled(false); status_->setText(QString::fromUtf8("Отмена расчёта…"));
 }
 void MainWindow::finishCalculation() {
-    auto *completed = task_;
-    if (!completed) return;
-    task_ = nullptr;
-    const bool success = completed->result.status == ballistic::Status::Completed;
-    const bool cancelled = completed->result.status == ballistic::Status::Cancelled;
-    status_->setText(QString::fromUtf8(completed->result.message.c_str()));
+    auto completed = controller_->takeResult();
+    auto plots = controller_->takePlots();
+    const bool success = completed.status == ballistic::Status::Completed;
+    const bool cancelled = completed.status == ballistic::Status::Cancelled;
+    status_->setText(QString::fromUtf8(completed.message.c_str()));
     status_->setProperty("tone", success || cancelled ? "normal" : "error"); ThemeManager::repolish(status_);
-    if (success) { result_ = std::move(completed->result); applyResult(); }
-    completed->deleteLater(); setBusy(false);
+    if (success) { result_ = std::move(completed); applyResult(std::move(plots)); }
+    setBusy(false);
     emit calculationFinished(success);
     if (closing_) QTimer::singleShot(0, this, &QWidget::close);
 }
-void MainWindow::applyResult() {
+void MainWindow::applyResult(PlotData plots) {
     parameters_ = result_.parameters;
     turnTime_->setValue(parameters_.turnTime); angle_->setValue(parameters_.turnDegrees);
     const auto &last = result_.trajectory.back();
@@ -197,20 +197,12 @@ void MainWindow::applyResult() {
         locale.toString(ballistic::orbitalSpeed(result_.options.targetAltitude), 'f', 3)));
     details_->setText(QString::fromUtf8("%1 точек · %2 с").arg(locale.toString(static_cast<qulonglong>(result_.trajectory.size())),
         locale.toString(result_.elapsedSeconds, 'f', 2)));
-    QVector<QPointF> data[7]; for (auto &series : data) series.reserve(int(result_.trajectory.size()));
-    for (const auto &s : result_.trajectory) {
-        const double h = (s.radius - ballistic::EarthRadius) / 1000, range = ballistic::EarthRadius * s.arc / 1000;
-        data[0].append({s.time, s.velocity}); data[1].append({s.time, h});
-        data[2].append({s.time, s.alpha * 180 / ballistic::Pi}); data[3].append({s.time, s.phi * 180 / ballistic::Pi});
-        data[4].append({s.time, s.overload}); data[5].append({s.time, range}); data[6].append({range, h});
-    }
-    QVector<double> events; for (double t : parameters_.separationTimes()) events.append(t);
-    for (int i = 0; i < 7; ++i) plots_[i]->setData(std::move(data[i]), i == 6 ? QVector<double>{} : events);
+    for (int i = 0; i < 7; ++i) plots_[i]->setSeries(std::move(plots.series[i]), i == 6 ? QVector<double>{} : plots.events);
     if (result_.atmosphereClamped)
         status_->setText(status_->text() + QString::fromUtf8(" На участке выше 300 км использована граница атмосферной таблицы."));
 }
 void MainWindow::closeEvent(QCloseEvent *event) {
-    if (task_) { closing_ = true; cancelCalculation(); event->ignore(); }
+    if (busy()) { closing_ = true; cancelCalculation(); event->ignore(); }
     else QMainWindow::closeEvent(event);
 }
 bool MainWindow::savePlotScreenshots(const QString &directory) {

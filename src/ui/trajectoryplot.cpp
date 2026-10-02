@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "trajectoryplot.h"
 #include <QPainter>
-#include <QPainterPath>
 #include <QWheelEvent>
 #include <QMouseEvent>
 #include <QLocale>
@@ -16,7 +15,6 @@ double tickStep(double span, int count) {
     return (fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10) * magnitude;
 }
 QString tickLabel(double n) { return QLocale().toString(std::abs(n) < 1e-10 ? 0 : n, 'g', 6); }
-int columnOf(double x) { return int(std::floor(std::max(-1000000.0, std::min(1000000.0, x)))); }
 }
 TrajectoryPlot::TrajectoryPlot(QString title, QString xLabel, QString yLabel, QWidget *parent)
     : QWidget(parent), title_(std::move(title)), xLabel_(std::move(xLabel)), yLabel_(std::move(yLabel)) {
@@ -25,22 +23,38 @@ TrajectoryPlot::TrajectoryPlot(QString title, QString xLabel, QString yLabel, QW
     setToolTip(QString::fromUtf8("Колесо — масштаб; перетаскивание — сдвиг; двойной щелчок — весь график."));
 }
 void TrajectoryPlot::setData(QVector<QPointF> points, const QVector<double> &separations) {
-    points_ = std::move(points); separations_ = separations;
-    if (points_.isEmpty()) { update(); return; }
-    double minX = points_[0].x(), maxX = minX, minY = points_[0].y(), maxY = minY;
-    sorted_ = true;
-    for (int i = 0; i < points_.size(); ++i) {
-        const auto &p = points_[i]; minX = std::min(minX, p.x()); maxX = std::max(maxX, p.x());
-        minY = std::min(minY, p.y()); maxY = std::max(maxY, p.y());
-        if (i && points_[i - 1].x() > p.x()) sorted_ = false;
-    }
-    const double dx = std::max(1e-6, maxX - minX), dy = std::max(1e-6, maxY - minY);
-    full_ = QRectF(minX - dx * 0.025, minY - dy * 0.08, dx * 1.05, dy * 1.16);
+    setSeries(PlotSeries(std::move(points)), separations);
+}
+void TrajectoryPlot::setSeries(PlotSeries series, const QVector<double> &separations) {
+    series_ = std::move(series); separations_ = separations; geometryDirty_ = true; sceneDirty_ = true;
+    if (series_.points().isEmpty()) { full_ = {}; view_ = {}; geometry_.clear(); update(); return; }
+    const auto bounds = series_.bounds();
+    const double dx = std::max(1e-6, bounds.width()), dy = std::max(1e-6, bounds.height());
+    full_ = QRectF(bounds.left() - dx * 0.025, bounds.top() - dy * 0.08, dx * 1.05, dy * 1.16);
     resetView();
+}
+void TrajectoryPlot::rebuildGeometry() {
+    if (!geometryDirty_ && cachedView_ == view_ && cachedSize_ == size()) return;
+    geometry_.clear(); auto indices = series_.visibleIndices(view_.left(), view_.right(), int(plotRect().width()));
+    const auto &points = series_.points();
+    for (double event : separations_) {
+        if (event < view_.left() || event > view_.right()) continue;
+        const int index = series_.nearestIndex(event);
+        if (index >= 0) indices.append(index);
+    }
+    std::sort(indices.begin(), indices.end());
+    indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
+    for (int index : indices) {
+        const auto point = screenPoint(points[index]);
+        geometry_.append(point);
+    }
+    geometryDirty_ = false; cachedView_ = view_; cachedSize_ = size(); ++geometryBuilds_;
 }
 void TrajectoryPlot::resetView() { view_ = full_; update(); }
 void TrajectoryPlot::changeEvent(QEvent *event) {
-    if (event->type() == QEvent::PaletteChange || event->type() == QEvent::StyleChange) update();
+    if (event->type() == QEvent::PaletteChange || event->type() == QEvent::StyleChange || event->type() == QEvent::FontChange) {
+        sceneDirty_ = true; update();
+    }
     QWidget::changeEvent(event);
 }
 QRectF TrajectoryPlot::plotRect() const { return QRectF(86, 65, std::max(20, width() - 112), std::max(20, height() - 127)); }
@@ -49,8 +63,9 @@ QPointF TrajectoryPlot::screenPoint(const QPointF &p) const {
     return {r.left() + (p.x() - view_.left()) / view_.width() * r.width(),
             r.bottom() - (p.y() - view_.top()) / view_.height() * r.height()};
 }
-void TrajectoryPlot::paintEvent(QPaintEvent *) {
-    QPainter painter(this); painter.setRenderHint(QPainter::Antialiasing);
+void TrajectoryPlot::paintStatic(QPainter &painter) {
+    const auto &points_ = series_.points();
+    painter.setRenderHint(QPainter::Antialiasing);
     const auto colors = palette();
     const auto muted = colors.color(QPalette::Disabled, QPalette::WindowText);
     painter.fillRect(rect(), colors.color(QPalette::Base));
@@ -85,59 +100,41 @@ void TrajectoryPlot::paintEvent(QPaintEvent *) {
     painter.save(); painter.setClipRect(area.adjusted(-1, -1, 1, 1));
     painter.setPen(QPen(colors.color(QPalette::BrightText), 1, Qt::DashLine));
     for (int i = 0; i < separations_.size(); ++i) {
+        if (separations_[i] < view_.left() || separations_[i] > view_.right()) continue;
         const double x = screenPoint({separations_[i], 0}).x();
         painter.drawLine(QPointF(x, area.top()), QPointF(x, area.bottom()));
         const double labelX = std::max(area.left() + 4, std::min(x + 4, area.right() - 58));
         painter.drawText(QRectF(labelX, area.top() + 4, 54, 20), QString::fromUtf8("%1-я ст.").arg(i + 1));
     }
-    // Keep first/min/max/last in each consecutive screen column, preserving
-    // extrema and their temporal order while limiting path complexity.
-    QPainterPath path; bool started = false;
-    int first = 0, end = points_.size();
-    if (sorted_) {
-        auto lower = std::lower_bound(points_.cbegin(), points_.cend(), view_.left(), [](const QPointF &p, double x) { return p.x() < x; });
-        auto upper = std::upper_bound(points_.cbegin(), points_.cend(), view_.right(), [](double x, const QPointF &p) { return x < p.x(); });
-        first = std::max(0, int(lower - points_.cbegin()) - 1); end = std::min(points_.size(), int(upper - points_.cbegin()) + 1);
-    }
-    for (int i = first; i < end;) {
-        const int column = columnOf(screenPoint(points_[i]).x());
-        int next = i + 1, minIndex = i, maxIndex = i;
-        while (next < end && columnOf(screenPoint(points_[next]).x()) == column) {
-            if (points_[next].y() < points_[minIndex].y()) minIndex = next;
-            if (points_[next].y() > points_[maxIndex].y()) maxIndex = next;
-            ++next;
-        }
-        std::array<int, 4> indices{{i, minIndex, maxIndex, next - 1}}; std::sort(indices.begin(), indices.end());
-        int previous = -1;
-        for (int index : indices) if (index != previous) {
-            const auto point = screenPoint(points_[index]);
-            if (!started) { path.moveTo(point); started = true; } else path.lineTo(point);
-            previous = index;
-        }
-        i = next;
-    }
-    painter.setPen(QPen(colors.color(QPalette::Highlight), 1.8)); painter.drawPath(path);
-    if (hovering_ && !dragging_ && area.contains(hover_)) {
-        const double x = view_.left() + (hover_.x() - area.left()) / area.width() * view_.width();
-        int nearest = 0;
-        if (sorted_) {
-            auto it = std::lower_bound(points_.cbegin(), points_.cend(), x, [](const QPointF &p, double value) { return p.x() < value; });
-            nearest = std::min(points_.size() - 1, int(it - points_.cbegin()));
-            if (nearest > 0 && std::abs(points_[nearest - 1].x() - x) < std::abs(points_[nearest].x() - x)) --nearest;
-        } else for (int i = 1; i < points_.size(); ++i)
-            if (std::abs(points_[i].x() - x) < std::abs(points_[nearest].x() - x)) nearest = i;
-        const auto point = screenPoint(points_[nearest]);
-        painter.setPen(QPen(muted, 1, Qt::DashLine));
-        painter.drawLine(QPointF(point.x(), area.top()), QPointF(point.x(), area.bottom()));
-        painter.setBrush(colors.color(QPalette::Highlight)); painter.drawEllipse(point, 3, 3);
-        painter.restore(); painter.save();
-        const QString text = QString::fromUtf8("x: %1   y: %2").arg(tickLabel(points_[nearest].x()), tickLabel(points_[nearest].y()));
-        painter.setPen(colors.color(QPalette::Text)); painter.drawText(QRectF(20, 43, width() - 45, 20), Qt::AlignRight, text);
-    }
+    rebuildGeometry();
+    painter.setPen(QPen(colors.color(QPalette::Highlight), 1.8));
+    // Bound the rasterizer's stroke complexity for dense, oscillating curves.
+    for (int first = 0; first + 1 < geometry_.size(); first += 15)
+        painter.drawPolyline(geometry_.constData() + first, std::min(16, geometry_.size() - first));
     painter.restore();
 }
+void TrajectoryPlot::paintEvent(QPaintEvent *) {
+    const qreal dpr = devicePixelRatioF();
+    if (sceneDirty_ || scene_.isNull() || sceneSize_ != size() || sceneView_ != view_ || scene_.devicePixelRatioF() != dpr) {
+        scene_ = QPixmap(qRound(width() * dpr), qRound(height() * dpr)); scene_.setDevicePixelRatio(dpr);
+        QPainter background(&scene_); paintStatic(background);
+        sceneSize_ = size(); sceneView_ = view_; sceneDirty_ = false;
+    }
+    QPainter painter(this); painter.drawPixmap(0, 0, scene_);
+    const auto &points = series_.points(); const auto area = plotRect();
+    if (points.isEmpty() || !hovering_ || dragging_ || !area.contains(hover_)) return;
+    const double x = view_.left() + (hover_.x() - area.left()) / area.width() * view_.width();
+    const int nearest = series_.nearestIndex(x); const auto point = screenPoint(points[nearest]);
+    const auto muted = palette().color(QPalette::Disabled, QPalette::WindowText);
+    painter.save(); painter.setClipRect(area); painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(QPen(muted, 1, Qt::DashLine));
+    painter.drawLine(QPointF(point.x(), area.top()), QPointF(point.x(), area.bottom()));
+    painter.setBrush(palette().color(QPalette::Highlight)); painter.drawEllipse(point, 3, 3); painter.restore();
+    const QString text = QString::fromUtf8("x: %1   y: %2").arg(tickLabel(points[nearest].x()), tickLabel(points[nearest].y()));
+    painter.setPen(palette().color(QPalette::Text)); painter.drawText(QRectF(20, 43, width() - 45, 20), Qt::AlignRight, text);
+}
 void TrajectoryPlot::wheelEvent(QWheelEvent *e) {
-    if (points_.isEmpty() || !plotRect().contains(e->pos())) return;
+    if (series_.points().isEmpty() || !plotRect().contains(e->pos())) return;
     const double scale = std::pow(1.2, -e->angleDelta().y() / 120.0);
     const auto area = plotRect();
     const double fx = (e->pos().x() - area.left()) / area.width();
@@ -148,7 +145,7 @@ void TrajectoryPlot::wheelEvent(QWheelEvent *e) {
     update(); e->accept();
 }
 void TrajectoryPlot::mousePressEvent(QMouseEvent *e) {
-    if (!points_.isEmpty() && e->button() == Qt::LeftButton && plotRect().contains(e->pos())) {
+    if (!series_.points().isEmpty() && e->button() == Qt::LeftButton && plotRect().contains(e->pos())) {
         dragging_ = true; lastMouse_ = e->pos(); setCursor(Qt::ClosedHandCursor);
     }
 }

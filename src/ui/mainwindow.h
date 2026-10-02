@@ -2,13 +2,13 @@
 #pragma once
 #include <QMainWindow>
 #include "model.h"
+#include "calculationcontroller.h"
 class NumberEdit;
 class QPushButton;
 class QLabel;
 class QCheckBox;
 class QProgressBar;
 class QTabWidget;
-class CalculationTask;
 class TrajectoryPlot;
 
 class MainWindow : public QMainWindow {
@@ -16,7 +16,7 @@ class MainWindow : public QMainWindow {
 public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override;
-    bool busy() const { return task_ != nullptr; }
+    bool busy() const { return controller_->busy(); }
     const ballistic::Result &lastResult() const { return result_; }
     ballistic::Parameters inputParameters() const;
     bool savePlotScreenshots(const QString &directory);
@@ -30,7 +30,7 @@ protected:
 private:
     ballistic::Parameters parameters_;
     ballistic::Result result_;
-    CalculationTask *task_ = nullptr;
+    CalculationController *controller_ = nullptr;
     bool closing_ = false;
     NumberEdit *vertical_, *turnTime_, *angle_, *target_, *step_;
     QPushButton *start_, *cancel_, *edit_;
@@ -41,6 +41,6 @@ private:
     QTabWidget *tabs_;
     TrajectoryPlot *plots_[7];
     void setBusy(bool busy);
-    void applyResult();
+    void applyResult(PlotData plots);
     void finishCalculation();
 };
