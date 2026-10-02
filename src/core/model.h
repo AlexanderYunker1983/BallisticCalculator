@@ -39,6 +39,16 @@ struct Options {
 };
 
 enum class Status { Completed, Cancelled, InvalidInput, NotConverged, NumericalFailure };
+enum class StopReason {
+    None, Cancelled, InvalidInput, TimeLimit, EvaluationLimit, StepLimit,
+    IterationLimit, SensitivityUnavailable, IllConditioned, NoImprovement, NumericalFailure
+};
+struct Diagnostics {
+    StopReason reason = StopReason::None;
+    int iterations = 0, rejectedProbes = 0;
+    bool residualAvailable = false;
+    double altitudeError = 0, velocityError = 0;
+};
 struct Sample {
     double time = 0, velocity = 0, theta = Pi / 2, radius = EarthRadius, arc = 0;
     double phi = Pi / 2, alpha = 0, mass = 0, acceleration = 0;
@@ -53,6 +63,7 @@ struct Result {
     int evaluations = 0;
     bool atmosphereClamped = false;
     double elapsedSeconds = 0;
+    Diagnostics diagnostics;
 };
 using CancelCheck = std::function<bool()>;
 using Progress = std::function<void(int, double, double)>;

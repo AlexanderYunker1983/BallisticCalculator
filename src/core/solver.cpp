@@ -9,7 +9,7 @@
 
 namespace ballistic {
 namespace {
-struct Stop { Status status; std::string message; };
+struct Stop { Status status; std::string message; StopReason reason; };
 using Clock = std::chrono::steady_clock;
 struct RunContext {
     const Options &o;
@@ -17,16 +17,16 @@ struct RunContext {
     Clock::time_point start;
     int evaluations = 0;
     void check() const {
-        if (cancelled && cancelled()) throw Stop{Status::Cancelled, "Расчёт отменён."};
+        if (cancelled && cancelled()) throw Stop{Status::Cancelled, "Расчёт отменён.", StopReason::Cancelled};
         if (std::chrono::duration<double>(Clock::now() - start).count() > o.timeLimitSeconds)
-            throw Stop{Status::NotConverged, "Достигнуто ограничение времени расчёта."};
+            throw Stop{Status::NotConverged, "Достигнуто ограничение времени расчёта.", StopReason::TimeLimit};
     }
 };
 Sample integrate(const Parameters &p, const Atmosphere &air, RunContext &ctx,
                  std::vector<Sample> *output, bool &clamped) {
     ctx.check();
     if (ctx.evaluations >= ctx.o.maxEvaluations)
-        throw Stop{Status::NotConverged, "Достигнут предел вычислений траектории."};
+        throw Stop{Status::NotConverged, "Достигнут предел вычислений траектории.", StopReason::EvaluationLimit};
     ++ctx.evaluations;
     Dynamics dynamics(p, air);
     State state{{0, Pi / 2, EarthRadius, 0}};
@@ -40,7 +40,7 @@ Sample integrate(const Parameters &p, const Atmosphere &air, RunContext &ctx,
     if (output) { output->clear(); output->reserve(std::min<std::size_t>(200000, ctx.o.maxSteps)); output->push_back(sample); }
     while (time < times[2]) {
         if ((steps & 127) == 0) ctx.check();
-        if (++steps > ctx.o.maxSteps) throw Stop{Status::NotConverged, "Достигнут предел шагов интегрирования."};
+        if (++steps > ctx.o.maxSteps) throw Stop{Status::NotConverged, "Достигнут предел шагов интегрирования.", StopReason::StepLimit};
         while (nextEvent < events.size() && events[nextEvent] <= time) ++nextEvent;
         const double boundary = nextEvent < events.size() ? events[nextEvent] : times[2];
         double dt = std::min(ctx.o.maxStep, 10 / std::max(1.0, state[0]));
@@ -59,7 +59,12 @@ Sample integrate(const Parameters &p, const Atmosphere &air, RunContext &ctx,
     ctx.check();
     return sample;
 }
-struct Residual { double h, v; double norm() const { return std::hypot(h / 1000, v / 100); } };
+struct Residual {
+    double h, v;
+    double norm(const Options &o) const {
+        return std::hypot(h / std::max(1e-12, o.altitudeTolerance), v / std::max(1e-12, o.velocityTolerance));
+    }
+};
 }
 
 Result Solver::run(const Parameters &input, const Options &o, CancelCheck cancelled, Progress progress) const {
@@ -68,7 +73,7 @@ Result Solver::run(const Parameters &input, const Options &o, CancelCheck cancel
     RunContext ctx{o, cancelled, start, 0};
     try {
         const auto error = validate(input, o);
-        if (!error.empty()) throw Stop{Status::InvalidInput, error};
+        if (!error.empty()) throw Stop{Status::InvalidInput, error, StopReason::InvalidInput};
         ctx.check();
         Parameters p = input;
         auto evaluate = [&](const Parameters &candidate) {
@@ -79,26 +84,60 @@ Result Solver::run(const Parameters &input, const Options &o, CancelCheck cancel
         };
         if (o.optimize) {
             Residual residual = evaluate(p);
+            auto record = [&] {
+                result.parameters = p;
+                result.diagnostics.residualAvailable = true;
+                result.diagnostics.altitudeError = residual.h;
+                result.diagnostics.velocityError = residual.v;
+            };
+            record();
             int iteration = 0;
             while (std::abs(residual.h) > o.altitudeTolerance || std::abs(residual.v) > o.velocityTolerance) {
                 ctx.check();
                 if (iteration++ >= o.maxIterations)
-                    throw Stop{Status::NotConverged, "Подбор параметров не сошёлся за заданное число итераций."};
+                    throw Stop{Status::NotConverged, "Подбор параметров не сошёлся за заданное число итераций.", StopReason::IterationLimit};
+                result.diagnostics.iterations = iteration;
                 if (progress) progress(iteration, residual.h, residual.v);
-                double da = p.turnDegrees < 89.9 ? 0.05 : -0.05;
-                double dt = p.turnTime + 0.2 < p.duration() - 0.001 ? 0.2 : -0.2;
-                Parameters pa = p, pt = p;
-                pa.turnDegrees += da; pt.turnTime += dt;
-                if (!validate(pa, o).empty() || !validate(pt, o).empty())
-                    throw Stop{Status::NotConverged, "Недостаточный интервал для подбора параметров."};
-                const auto ra = evaluate(pa), rt = evaluate(pt);
-                const double a = (ra.h - residual.h) / da, b = (rt.h - residual.h) / dt;
-                const double c = (ra.v - residual.v) / da, d = (rt.v - residual.v) / dt;
+                auto sensitivity = [&](bool angle) {
+                    const double initialStep = angle ? 0.05 : 0.2;
+                    const double origin = angle ? p.turnDegrees : p.turnTime;
+                    for (int reduction = 0; reduction < 10; ++reduction) {
+                        for (double direction : {1.0, -1.0}) {
+                            ctx.check();
+                            Parameters candidate = p;
+                            double &value = angle ? candidate.turnDegrees : candidate.turnTime;
+                            value += direction * std::ldexp(initialStep, -reduction);
+                            const double delta = value - origin;
+                            if (delta == 0 || !validate(candidate, o).empty()) continue;
+                            try {
+                                const auto probe = evaluate(candidate);
+                                const Residual derivative{(probe.h - residual.h) / delta, (probe.v - residual.v) / delta};
+                                if (std::isfinite(derivative.h) && std::isfinite(derivative.v)) return derivative;
+                            } catch (const std::runtime_error &) {
+                                // Only a failed numerical probe is recoverable. Stop propagates.
+                            }
+                            ++result.diagnostics.rejectedProbes;
+                        }
+                    }
+                    throw Stop{Status::NotConverged, "Не удалось оценить чувствительность в допустимой области.", StopReason::SensitivityUnavailable};
+                };
+                const auto ra = sensitivity(true), rt = sensitivity(false);
+                const double hScale = std::max(1e-12, o.altitudeTolerance), vScale = std::max(1e-12, o.velocityTolerance);
+                // Columns use characteristic changes of 5 degrees and 30 seconds.
+                double a = ra.h * 5 / hScale, b = rt.h * 30 / hScale;
+                double c = ra.v * 5 / vScale, d = rt.v * 30 / vScale;
+                const double matrixScale = std::max({std::abs(a), std::abs(b), std::abs(c), std::abs(d)});
+                if (!std::isfinite(matrixScale) || matrixScale == 0)
+                    throw Stop{Status::NotConverged, "Подбор остановлен: некорректная чувствительность параметров.", StopReason::IllConditioned};
+                a /= matrixScale; b /= matrixScale; c /= matrixScale; d /= matrixScale;
                 const double determinant = a * d - b * c;
-                if (!std::isfinite(determinant) || std::abs(determinant) < 1e-12)
-                    throw Stop{Status::NotConverged, "Подбор остановлен: вырожденная чувствительность параметров."};
-                double angleChange = (-residual.h * d + b * residual.v) / determinant;
-                double timeChange = (c * residual.h - a * residual.v) / determinant;
+                if (std::abs(determinant) <= 1e-10 * std::hypot(a, c) * std::hypot(b, d))
+                    throw Stop{Status::NotConverged, "Подбор остановлен: вырожденная чувствительность параметров.", StopReason::IllConditioned};
+                const double h = residual.h / hScale / matrixScale, v = residual.v / vScale / matrixScale;
+                double angleChange = 5 * (-h * d + b * v) / determinant;
+                double timeChange = 30 * (c * h - a * v) / determinant;
+                if (!std::isfinite(angleChange) || !std::isfinite(timeChange))
+                    throw Stop{Status::NotConverged, "Подбор остановлен: неконечное изменение параметров.", StopReason::IllConditioned};
                 const double factor = std::min(1.0, std::min(5.0 / std::max(1e-30, std::abs(angleChange)),
                                                           30.0 / std::max(1e-30, std::abs(timeChange))));
                 angleChange *= factor; timeChange *= factor;
@@ -110,10 +149,10 @@ Result Solver::run(const Parameters &input, const Options &o, CancelCheck cancel
                     if (!validate(candidate, o).empty()) continue;
                     try {
                         const auto trial = evaluate(candidate);
-                        if (trial.norm() < residual.norm()) { p = candidate; residual = trial; accepted = true; break; }
+                        if (trial.norm(o) < residual.norm(o)) { p = candidate; residual = trial; record(); accepted = true; break; }
                     } catch (const std::runtime_error &) { /* Reject an invalid candidate, retain last valid state. */ }
                 }
-                if (!accepted) throw Stop{Status::NotConverged, "Подбор остановлен: дальнейшее уменьшение ошибки не найдено."};
+                if (!accepted) throw Stop{Status::NotConverged, "Подбор остановлен: дальнейшее уменьшение ошибки не найдено.", StopReason::NoImprovement};
             }
         }
         result.parameters = p; // Exactly the inputs used to create the returned trajectory.
@@ -123,8 +162,8 @@ Result Solver::run(const Parameters &input, const Options &o, CancelCheck cancel
             throw std::runtime_error("Контрольный расчёт не подтвердил найденные параметры.");
         result.status = Status::Completed;
         result.message = o.optimize ? "Подбор завершён: достигнуты допуски высоты и скорости." : "Траектория рассчитана с заданными параметрами.";
-    } catch (const Stop &stop) { result.status = stop.status; result.message = stop.message; result.trajectory.clear(); }
-      catch (const std::exception &ex) { result.status = Status::NumericalFailure; result.message = ex.what(); result.trajectory.clear(); }
+    } catch (const Stop &stop) { result.status = stop.status; result.message = stop.message; result.diagnostics.reason = stop.reason; result.trajectory.clear(); }
+      catch (const std::exception &ex) { result.status = Status::NumericalFailure; result.message = ex.what(); result.diagnostics.reason = StopReason::NumericalFailure; result.trajectory.clear(); }
     result.evaluations = ctx.evaluations;
     result.elapsedSeconds = std::chrono::duration<double>(Clock::now() - start).count();
     return result;

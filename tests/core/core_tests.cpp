@@ -196,8 +196,27 @@ private slots:
         QCOMPARE(solver.run(p, o).status, Status::Completed);
         o.optimize = true;
         const auto r = solver.run(p, o);
-        QEXPECT_FAIL("", "Regression: a failed forward probe aborts optimization; step 4.", Continue);
         QVERIFY(r.status != Status::NumericalFailure);
+        QVERIFY(r.diagnostics.rejectedProbes > 0);
+        QVERIFY(r.evaluations > 2);
+        QVERIFY(r.diagnostics.residualAvailable);
+    }
+    void optimizerDiagnosticsAndLimits() {
+        Options o; o.maxEvaluations = 2;
+        auto r = solver.run(Parameters{}, o);
+        QCOMPARE(r.diagnostics.reason, StopReason::EvaluationLimit); QCOMPARE(r.evaluations, 2);
+        o = Options{}; o.maxSteps = 2;
+        QCOMPARE(solver.run(Parameters{}, o).diagnostics.reason, StopReason::StepLimit);
+        o = Options{}; o.maxIterations = 1;
+        QCOMPARE(solver.run(Parameters{}, o).diagnostics.reason, StopReason::IterationLimit);
+        o = Options{}; o.timeLimitSeconds = 1e-9;
+        QCOMPARE(solver.run(Parameters{}, o).diagnostics.reason, StopReason::TimeLimit);
+        QCOMPARE(solver.run(Parameters{}, Options{}, [] { return true; }).diagnostics.reason, StopReason::Cancelled);
+        Parameters p; p.turnTime = 580; p.turnDegrees = 12.985755371093751;
+        o = Options{}; o.maxStep = 0.1; o.maxEvaluations = 2;
+        r = solver.run(p, o);
+        QCOMPARE(r.diagnostics.reason, StopReason::EvaluationLimit);
+        QCOMPARE(r.evaluations, 2); QCOMPARE(r.diagnostics.rejectedProbes, 1);
     }
 };
 QTEST_APPLESS_MAIN(CoreTests)
